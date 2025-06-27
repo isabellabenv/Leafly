@@ -12,81 +12,105 @@ import FirebaseCore
 
 func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
     FirebaseApp.configure()
-    // ... your other setup
     return true
 }
 
 
+
+
 struct ContentView: View {
     
-    @State private var username: String = ""
+    @State private var email: String = ""
     @State private var password: String = ""
+    @State private var showingAlert = false
+    @State private var alertMessage = ""
+    @EnvironmentObject var authManager: AuthManager
     
     var body: some View {
         NavigationView {
-        ZStack {
-            // Gradient background
-            RadialGradient(colors: [Color.palegreen, Color.ggreen], center: .center, startRadius: 100, endRadius: 350)
-                .ignoresSafeArea()
-
-            VStack(spacing: 20) {
-                // Logo
-                Image("leafly")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 400, height: 150)
+            ZStack {
+                // Gradient background
+                RadialGradient(colors: [Color.palegreen, Color.ggreen], center: .center, startRadius: 100, endRadius: 350)
+                    .ignoresSafeArea()
                 
-                // Form Container
                 VStack(spacing: 20) {
-
-                    // TextFields
-                    TextField("Username…", text: $username)
-                        .padding()
-                        .background(Color.white)
-                        .cornerRadius(10)
-                        .padding(.horizontal)
-
-                    SecureField("Password…", text: $password)
-                        .padding()
-                        .background(Color.white)
-                        .cornerRadius(10)
-                        .padding(.horizontal)
-
-                    // Log in button
-                    Button(action: {
-                        // Handle login
-                    }) {
-                        Text("Log in")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
+                    // Logo
+                    Image("leafly")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 400, height: 150)
+                    
+                    // Form Container
+                    VStack(spacing: 20) {
+                        
+                        // TextFields
+                        TextField("Username…", text: $email)
                             .padding()
-                            .background(Color.ggreen)
-                            .foregroundColor(.white)
+                            .background(Color.white)
                             .cornerRadius(10)
+                            .padding(.horizontal)
+                        
+                        SecureField("Password…", text: $password)
+                            .padding()
+                            .background(Color.white)
+                            .cornerRadius(10)
+                            .padding(.horizontal)
+                        
+                        // Log in button
+                        Button(action: {
+                            signInUser()
+                        }) {
+                            Text("Log in")
+                                .fontWeight(.semibold)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.ggreen)
+                                .foregroundColor(.white)
+                                .cornerRadius(10)
+                        }
+                        .padding(.horizontal)
+                        
+                        // Forgot password and Sign up links
+                        VStack(spacing: 10) {
+                            NavigationLink(destination: forgotpassword()) {
+                                Text("Forgot your password?")
+                                    .foregroundColor(.gray)
+                                    .underline()
+                            }
+                            NavigationLink(destination: SignupView()) {
+                                Text("Don’t have an account yet?")
+                                    .foregroundColor(.gray)
+                                    .underline()
+                            }
+                        }
                     }
+                    .padding()
+                    .background(Color.white)
+                    .cornerRadius(25)
                     .padding(.horizontal)
-
-                    // Forgot password and Sign up links
-                    VStack(spacing: 10) {
-                        NavigationLink(destination: forgotpassword()) {
-                        Text("Forgot your password?")
-                        .foregroundColor(.gray)
-                        .underline()
-                        }
-                        NavigationLink(destination: SignupView()) {
-                            Text("Don’t have an account yet?")
-                                .foregroundColor(.gray)
-                                .underline()
-                        }
-                    }
-                }
-                .padding()
-                .background(Color.white)
-                .cornerRadius(25)
-                .padding(.horizontal)
                 }
             }
         }
+    }
+    private func signInUser() {
+            guard !email.isEmpty, !password.isEmpty else {
+                alertMessage = "Please enter both email and password."
+                showingAlert = true
+                return
+            }
+
+            Auth.auth().signIn(withEmail: email, password: password) { result, error in
+                if let error = error {
+                    print("Error signing in: \(error.localizedDescription)")
+                    alertMessage = error.localizedDescription
+                    showingAlert = true
+                } else {
+                    print("User successfully logged in! AuthManager's listener will update.")
+                    // No need to directly set authManager.isAuthenticated here;
+                    // the `AuthManager`'s internal listener (in its init) will detect
+                    // the sign-in and automatically update its @Published isAuthenticated.
+                }
+            }
     }
 }
 
@@ -159,7 +183,6 @@ struct SignupView: View {
                     .padding()
                     .background(Color.white)
                     .cornerRadius(25)
-                    .navigationTitle("Sign Up")
                     .padding(.horizontal)
                 }
             }
@@ -167,20 +190,30 @@ struct SignupView: View {
     }
     
     struct successView: View {
+        @State private var returntologin = false
         var body: some View {
-            NavigationView{
                 ZStack{
+                RadialGradient(colors: [Color.palegreen, Color.ggreen], center: .center, startRadius: 100, endRadius: 350)
+                            .ignoresSafeArea()
+
                     VStack{
-                        NavigationLink(destination: ContentView()) {
-                            Text("Return to login")
-                                .foregroundColor(.gray)
-                                .underline()
+                        Button("Return to login") {
+                            returntologin.toggle()
+                        }
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.ggreen)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .padding(.horizontal)
+                        .fullScreenCover(isPresented: $returntologin) {
+                            ContentView()
+                        }
                         }
                     }
                 }
-            }
         }
-    }
 
     // Function to handle the signup process using Firebase Auth
     private func signupUser() {
