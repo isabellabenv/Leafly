@@ -1,32 +1,64 @@
-//
-//  profilePage.swift
-//  test
-//
-//  Created by Isabella Benvenuto on 23/6/2025.
-//
-
 import SwiftUI
+import PhotosUI
+import FirebaseAuth
+import FirebaseStorage
+import FirebaseDatabaseInternal
 
 struct ProfileView: View {
+    @State private var showMenu = false
+    @State private var profileImage: UIImage? = nil
+    @State private var profileImageUrl: URL? = nil
+    @State private var selectedItem: PhotosPickerItem? {
+        didSet {
+            if let item = selectedItem {
+                Task {
+                    await loadImage(from: item)
+                }
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Profile Header
             VStack {
                 HStack {
-                    Image("profile_photo") // Replace with actual image asset
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 60, height: 60)
-                        .clipShape(Circle())
-                        .padding(.leading)
+                    // Tappable image picker
+                    PhotosPicker(selection: $selectedItem, matching: .images) {
+                        if let url = profileImageUrl {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .empty:
+                                    ProgressView()
+                                        .frame(width: 80, height: 80)
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 80, height: 80)
+                                        .clipShape(Circle())
+                                case .failure:
+                                    Image(systemName: "person.crop.circle.badge.exclamationmark")
+                                        .resizable()
+                                        .frame(width: 80, height: 80)
+                                @unknown default:
+                                    EmptyView()
+                                }
+                            }
+                        } else {
+                            Circle()
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(width: 80, height: 80)
+                                .overlay(
+                                    Image(systemName: "person.crop.circle")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(.white)
+                                )
+                        }
+                    }
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Amélie Dean")
+                        Text("Name")
                             .font(.headline)
-                        Text("@Deanosaurrr")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-
                         ProgressView(value: 0.75)
                             .progressViewStyle(LinearProgressViewStyle(tint: .green))
                             .frame(width: 100)
@@ -37,8 +69,10 @@ struct ProfileView: View {
 
                     Spacer()
 
-                    Image(systemName: "ellipsis")
-                        .padding()
+                    Button(action: openMenu) {
+                        Label("", systemImage: "ellipsis")
+                    }
+                    .padding()
                 }
 
                 HStack {
@@ -62,7 +96,6 @@ struct ProfileView: View {
             }
             .background(Color.ggreen)
 
-            // Tabs
             HStack {
                 Text("All Posts").bold()
                 Spacer()
@@ -73,17 +106,13 @@ struct ProfileView: View {
             .padding()
             .background(Color.palegreen)
 
-            // Posts
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    PostView(profileImage: "profile_photo", name: "Amelie Dean", time: "2 hours ago", action: "Used a reusable bag", quote: "So glad I didn’t have to pay 50c", points: "+10")
-                    
-                    PostView(profileImage: "profile_photo", name: "Amelie Dean", time: "4 hours ago", action: "Repurposed an old shirt", quote: "Didn’t want to throw it out", points: "+50", postImage: "repurposed_shirt")
+                    // PostView examples go here
                 }
                 .padding()
             }
 
-            // Bottom Navigation
             HStack {
                 Spacer(minLength: 20)
                 Image(systemName: "house")
@@ -108,8 +137,57 @@ struct ProfileView: View {
                 Spacer(minLength: 20)
             }
             .padding()
-            .frame(width: .infinity, height: 100)
+            .frame(height: 100)
             .background(Color.ggreen)
+        }
+        .sheet(isPresented: $showMenu) {
+            MenuView()
+        }
+        .task {
+            loadProfileImageURL()
+        }
+    }
+
+    private func openMenu() {
+        showMenu.toggle()
+    }
+
+    private func loadProfileImageURL() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let dbRef = Database.database().reference()
+        dbRef.child("users/\(uid)/profileImageUrl").observeSingleEvent(of: .value) { snapshot in
+            if let urlString = snapshot.value as? String, let url = URL(string: urlString) {
+                profileImageUrl = url
+            }
+        }
+    }
+
+    private func loadImage(from item: PhotosPickerItem) async {
+        do {
+            if let data = try await item.loadTransferable(type: Data.self),
+               let uiImage = UIImage(data: data) {
+                self.profileImage = uiImage
+                await uploadProfileImage(uiImage)
+            }
+        } catch {
+            print("Error loading image: \(error.localizedDescription)")
+        }
+    }
+
+    private func uploadProfileImage(_ image: UIImage) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else { return }
+
+        let storageRef = Storage.storage().reference().child("profile_pictures/\(uid).jpg")
+
+        do {
+            _ = try await storageRef.putDataAsync(imageData)
+            let downloadURL = try await storageRef.downloadURL()
+            let dbRef = Database.database().reference()
+            try await dbRef.child("users/\(uid)/profileImageUrl").setValue(downloadURL.absoluteString)
+            profileImageUrl = downloadURL
+        } catch {
+            print("Upload failed: \(error.localizedDescription)")
         }
     }
 }
