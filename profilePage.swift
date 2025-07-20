@@ -153,13 +153,8 @@ struct ProfileView: View {
     }
 
     private func loadProfileImageURL() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        let dbRef = Database.database().reference()
-        dbRef.child("users/\(uid)/profileImageUrl").observeSingleEvent(of: .value) { snapshot in
-            if let urlString = snapshot.value as? String, let url = URL(string: urlString) {
-                profileImageUrl = url
-            }
-        }
+        let uid = Auth.auth().currentUser?.uid ?? "default"
+        let ref = Storage.storage().reference().child("profile_pictures/\(uid).jpg")
     }
 
     private func loadImage(from item: PhotosPickerItem) async {
