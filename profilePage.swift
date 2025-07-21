@@ -31,7 +31,7 @@ struct ProfileView: View {
                 case .home:
                     HomeView()
                 case .addPost:
-                    AddPostView()
+                    CreatePostView()
                 case .profile:
                     profileContent
                 }
@@ -232,21 +232,6 @@ struct ProfileView: View {
             if let value = snapshot.value as? [String: Any] {
                 self.username = value["username"] as? String ?? "Unknown"
             }
-        }
-    }
-    struct HomeView: View {
-        var body: some View {
-            Text("Home View")
-                .font(.largeTitle)
-                .foregroundColor(.gray)
-        }
-    }
-
-    struct AddPostView: View {
-        var body: some View {
-            Text("Add Post View")
-                .font(.largeTitle)
-                .foregroundColor(.gray)
         }
     }
 }
