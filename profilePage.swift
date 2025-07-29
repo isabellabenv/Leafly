@@ -1,4 +1,25 @@
- Bool    // var
+import SwiftUI
+import PhotosUI
+import FirebaseAuth
+import FirebaseStorage
+import FirebaseDatabase
+import FirebaseDatabaseInternal
+
+enum SelectedTab {
+    case home, addPost, profile
+}
+
+struct Post: Identifiable {
+    let id: String
+    let userId: String
+    let text: String
+    let imageUrl: String?
+    let timestamp: Double
+    let category: String
+    let points: Int
+    var likes: Int                    // var
+    var commentsCount: Int            // var
+    var isLikedByCurrentUser: Bool    // var
 }
 
 struct ProfileView: View {
