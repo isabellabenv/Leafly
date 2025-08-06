@@ -45,9 +45,11 @@ struct HomeView: View {
                     ScrollView {
                         VStack(spacing: 16) {
                             ForEach(posts) { postWithUser in
-                                PostCardView(postWithUser: postWithUser) {
-                                    toggleLike(for: postWithUser.post.id)
-                                }
+                                PostCardView(
+                                    postWithUser: postWithUser,
+                                    onLike: { toggleLike(for: postWithUser.post.id) },
+                                    onFollow: { followUser(targetUserId: postWithUser.post.userId) } // <-- Add this
+                                )
                             }
                         }
                         .padding()
@@ -208,13 +210,36 @@ struct HomeView: View {
             return TransactionResult.success(withValue: currentData)
         }
     }
-    
+    private func followUser(targetUserId: String) {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        if currentUserId == targetUserId { return } // can't follow yourself
+
+        let usersRef = Database.database().reference().child("users")
+
+        // Increment current user's following count
+        usersRef.child(currentUserId).child("followingCount").runTransactionBlock { data in
+            var count = data.value as? Int ?? 0
+            data.value = count + 1
+            return .success(withValue: data)
+        }
+
+        // Increment target user's followers count
+        usersRef.child(targetUserId).child("followersCount").runTransactionBlock { data in
+            var count = data.value as? Int ?? 0
+            data.value = count + 1
+            return .success(withValue: data)
+        }
+    }
+
 }
 
 
 struct PostCardView: View {
+    @State private var isFollowing = false
+    @State private var hasFollowed = false
     let postWithUser: PostWithUser
     var onLike: (() -> Void)?
+    var onFollow: (() -> Void)?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -237,8 +262,11 @@ struct PostCardView: View {
                 }
 
                 VStack(alignment: .leading) {
-                    Text(postWithUser.username)
-                        .font(.headline)
+                    NavigationLink(destination: OtherUserProfileView(userId: postWithUser.post.userId)) {
+                        Text(postWithUser.username)
+                            .font(.headline)
+                            .foregroundStyle(.black)
+                    }
                     Text(Date(timeIntervalSince1970: postWithUser.post.timestamp)
                         .formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
@@ -286,11 +314,61 @@ struct PostCardView: View {
                         .font(.caption)
                         .foregroundColor(.gray)
                 }
+                
+                // Only show Follow button if this is NOT the current user
+                if postWithUser.post.userId != Auth.auth().currentUser?.uid {
+                    Button(action: {
+                        toggleFollow(targetUserId: postWithUser.post.userId)
+                    }) {
+                        Text(isFollowing ? "Unfollow" : "Follow")
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(isFollowing ? Color.gray.opacity(0.3) : Color.blue)
+                            .foregroundColor(isFollowing ? .black : .white)
+                            .cornerRadius(6)
+                    }
+                }
             }
         }
         .padding()
         .background(Color.white)
         .cornerRadius(12)
         .shadow(radius: 2)
+        .onAppear {
+            checkIfFollowing()
+        }
     }
+    private func toggleFollow(targetUserId: String) {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        let userRef = Database.database().reference().child("users")
+        let currentUserFollowingRef = userRef.child(currentUserId).child("following").child(targetUserId)
+        let targetUserFollowersRef = userRef.child(targetUserId).child("followers").child(currentUserId)
+
+        currentUserFollowingRef.observeSingleEvent(of: .value) { snapshot in
+            if snapshot.exists() {
+                // Unfollow
+                currentUserFollowingRef.removeValue()
+                targetUserFollowersRef.removeValue()
+                self.isFollowing = false
+            } else {
+                // Follow
+                currentUserFollowingRef.setValue(true)
+                targetUserFollowersRef.setValue(true)
+                self.isFollowing = true
+            }
+        }
+    }
+    private func checkIfFollowing() {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        let ref = Database.database().reference()
+            .child("users").child(currentUserId).child("following").child(postWithUser.post.userId)
+        ref.observeSingleEvent(of: .value) { snapshot in
+            self.isFollowing = snapshot.exists()
+        }
+    }
+}
+
+#Preview {
+    HomeView()
 }
