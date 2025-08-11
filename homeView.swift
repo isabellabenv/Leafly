@@ -12,6 +12,9 @@ struct PostWithUser: Identifiable {
 struct HomeView: View {
     @State private var posts: [PostWithUser] = []
     @State private var isLoading = true
+    @StateObject private var postService = PostService.shared
+    @StateObject private var followService = FollowService.shared
+
 
     var body: some View {
         NavigationView {
@@ -24,6 +27,12 @@ struct HomeView: View {
                             .bold()
                     }
                     Spacer()
+                    NavigationLink(destination: LeaderboardView()) {
+                        Image(systemName: "list.number")
+                            .resizable()
+                            .frame(width: 30, height: 30)
+                            .foregroundColor(.white)
+                    }
                     Image(systemName: "leaf.fill")
                         .resizable()
                         .frame(width: 40, height: 40)
@@ -34,22 +43,19 @@ struct HomeView: View {
 
 
                 // Posts Feed
-                if isLoading {
-                    ProgressView("Loading posts...")
-                        .padding()
-                } else if posts.isEmpty {
-                    Text("No posts available.")
-                        .foregroundColor(.gray)
-                        .padding()
+
+                if postService.posts.isEmpty {
+                    ProgressView("Loading posts...").padding()
                 } else {
                     ScrollView {
                         VStack(spacing: 16) {
-                            ForEach(posts) { postWithUser in
+                            ForEach(postService.posts) { postWithUser in
                                 PostCardView(
                                     postWithUser: postWithUser,
-                                    onLike: { toggleLike(for: postWithUser.post.id) },
-                                    onFollow: { followUser(targetUserId: postWithUser.post.userId) } // <-- Add this
+                                    onLike: { postService.toggleLike(postID: postWithUser.post.id) },
+                                    onFollow: { followService.toggleFollow(userId: postWithUser.post.userId) }
                                 )
+                                .environmentObject(followService) // pass follow service down
                             }
                         }
                         .padding()
@@ -235,11 +241,11 @@ struct HomeView: View {
 
 
 struct PostCardView: View {
-    @State private var isFollowing = false
-    @State private var hasFollowed = false
     let postWithUser: PostWithUser
     var onLike: (() -> Void)?
     var onFollow: (() -> Void)?
+    @State private var isFollowing = false
+    @EnvironmentObject private var followService: FollowService
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -260,7 +266,7 @@ struct PostCardView: View {
                         .frame(width: 40, height: 40)
                         .overlay(Image(systemName: "person.fill").foregroundColor(.white))
                 }
-
+                
                 VStack(alignment: .leading) {
                     NavigationLink(destination: OtherUserProfileView(userId: postWithUser.post.userId)) {
                         Text(postWithUser.username)
@@ -269,16 +275,16 @@ struct PostCardView: View {
                     }
                     Text(Date(timeIntervalSince1970: postWithUser.post.timestamp)
                         .formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                    .font(.caption)
+                    .foregroundColor(.gray)
                 }
                 Spacer()
             }
-
+            
             // Post text
             Text(postWithUser.post.text)
                 .font(.body)
-
+            
             // Post image
             if let urlString = postWithUser.post.imageUrl, let url = URL(string: urlString) {
                 AsyncImage(url: url) { phase in
@@ -291,7 +297,7 @@ struct PostCardView: View {
                 }
                 .clipped()
             }
-
+            
             // Points
             HStack {
                 Image(systemName: "leaf.circle")
@@ -315,17 +321,16 @@ struct PostCardView: View {
                         .foregroundColor(.gray)
                 }
                 
-                // Only show Follow button if this is NOT the current user
                 if postWithUser.post.userId != Auth.auth().currentUser?.uid {
                     Button(action: {
-                        toggleFollow(targetUserId: postWithUser.post.userId)
+                        onFollow?()
                     }) {
-                        Text(isFollowing ? "Unfollow" : "Follow")
+                        Text(followService.isFollowing(postWithUser.post.userId) ? "Unfollow" : "Follow")
                             .font(.caption)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
-                            .background(isFollowing ? Color.gray.opacity(0.3) : Color.blue)
-                            .foregroundColor(isFollowing ? .black : .white)
+                            .background(followService.isFollowing(postWithUser.post.userId) ? Color.gray.opacity(0.3) : Color.blue)
+                            .foregroundColor(followService.isFollowing(postWithUser.post.userId) ? .black : .white)
                             .cornerRadius(6)
                     }
                 }
@@ -336,7 +341,9 @@ struct PostCardView: View {
         .cornerRadius(12)
         .shadow(radius: 2)
         .onAppear {
-            checkIfFollowing()
+            if !postWithUser.post.userId.isEmpty {
+                checkIfFollowing()
+            }
         }
     }
     private func toggleFollow(targetUserId: String) {
@@ -344,7 +351,7 @@ struct PostCardView: View {
         let userRef = Database.database().reference().child("users")
         let currentUserFollowingRef = userRef.child(currentUserId).child("following").child(targetUserId)
         let targetUserFollowersRef = userRef.child(targetUserId).child("followers").child(currentUserId)
-
+        
         currentUserFollowingRef.observeSingleEvent(of: .value) { snapshot in
             if snapshot.exists() {
                 // Unfollow
@@ -360,11 +367,118 @@ struct PostCardView: View {
         }
     }
     private func checkIfFollowing() {
-        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        guard let currentUserId = Auth.auth().currentUser?.uid,
+              !postWithUser.post.userId.isEmpty else { return }
+        
         let ref = Database.database().reference()
-            .child("users").child(currentUserId).child("following").child(postWithUser.post.userId)
+            .child("users")
+            .child(currentUserId)
+            .child("following")
+            .child(postWithUser.post.userId)
+        
         ref.observeSingleEvent(of: .value) { snapshot in
             self.isFollowing = snapshot.exists()
+        }
+    }
+}
+struct LeaderboardView: View {
+    @State private var leaderboard: [(uid: String, username: String, profileImageUrl: String?, points: Int)] = []
+    @State private var isLoading = true
+    @State private var currentUserId: String?
+    
+    var body: some View {
+        VStack {
+            if isLoading {
+                ProgressView("Loading leaderboard...")
+                    .padding()
+            } else if leaderboard.isEmpty {
+                Text("No users found.")
+                    .foregroundColor(.gray)
+            } else {
+                List {
+                    ForEach(Array(leaderboard.prefix(10).enumerated()), id: \.offset) { index, user in
+                        leaderboardRow(index: index, user: user)
+                    }
+                    
+                    // Show current user's rank if they're not in top 10
+                    if let currentId = currentUserId,
+                       let myIndex = leaderboard.firstIndex(where: { $0.uid == currentId }),
+                       myIndex >= 10 {
+                        Section {
+                            leaderboardRow(index: myIndex, user: leaderboard[myIndex])
+                        } header: {
+                            Text("Your Rank")
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Leaderboard")
+        .onAppear {
+            currentUserId = Auth.auth().currentUser?.uid
+            loadLeaderboard()
+        }
+    }
+    
+    @ViewBuilder
+    private func leaderboardRow(index: Int, user: (uid: String, username: String, profileImageUrl: String?, points: Int)) -> some View {
+        HStack {
+            Text("\(index + 1)")
+                .font(.headline)
+                .frame(width: 30)
+            
+            if let urlString = user.profileImageUrl, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty: ProgressView().frame(width: 40, height: 40)
+                    case .success(let image): image.resizable().scaledToFill().frame(width: 40, height: 40).clipShape(Circle())
+                    case .failure: Circle().fill(Color.green.opacity(0.3)).frame(width: 40, height: 40).overlay(Image(systemName: "person.fill").foregroundColor(.white))
+                    @unknown default: EmptyView()
+                    }
+                }
+            } else {
+                Circle()
+                    .fill(Color.green.opacity(0.3))
+                    .frame(width: 40, height: 40)
+                    .overlay(Image(systemName: "person.fill").foregroundColor(.white))
+            }
+            
+            VStack(alignment: .leading) {
+                Text(user.username)
+                    .font(.headline)
+                Text("\(user.points) Green Points")
+                    .font(.caption)
+                    .foregroundColor(.green)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
+        .background(
+            user.uid == currentUserId ? Color.yellow.opacity(0.2) : Color.clear
+        )
+        .cornerRadius(8)
+    }
+    
+    private func loadLeaderboard() {
+        let usersRef = Database.database().reference().child("users")
+        
+        usersRef.observeSingleEvent(of: .value) { snapshot in
+            var fetchedLeaderboard: [(String, String, String?, Int)] = []
+            
+            for case let child as DataSnapshot in snapshot.children {
+                guard let userData = child.value as? [String: Any] else { continue }
+                let username = userData["username"] as? String ?? "Unknown"
+                let profileImageUrl = userData["profileImageUrl"] as? String
+                let points = userData["greenPoints"] as? Int ?? 0
+                fetchedLeaderboard.append((child.key, username, profileImageUrl, points))
+            }
+            
+            fetchedLeaderboard.sort { $0.3 > $1.3 } // Sort by points descending
+            
+            DispatchQueue.main.async {
+                self.leaderboard = fetchedLeaderboard
+                self.isLoading = false
+            }
         }
     }
 }
