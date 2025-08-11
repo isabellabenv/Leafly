@@ -1,10 +1,111 @@
 import SwiftUI
 import PhotosUI
+import FirebaseAuth
+import FirebaseStorage
+import FirebaseDatabase
+import FirebaseDatabaseInternal
 
 struct CreatePostView: View {
-    @State private var postText: String = ""
-    @State private var selectedImage: PhotosPickerItem? = nil
-    @State private var postImage: UIImage? = nil
+    @State private var postText: String = "" // Stores the text of the post
+    @State private var selectedImage: PhotosPickerItem? = nil // Stores the selected image from the photo picker
+    @State private var postImage: UIImage? = nil // Stores the UIImage for display and upload
+    @State private var selectedCategory: String = "Climate Action" // Default selected category
+    @State private var isUploading = false // Indicates if upload is in progress
+    @State private var uploadError: String? // Stores any upload error messages
+    @State private var uploadSuccess = false // Indicates if upload succeeded
+
+    // MARK: - Categories List
+    let categories = [
+        "Alternative Energy Use",
+        "Avoiding Single-Use Plastics",
+        "Beach Cleanups",
+        "Bike Commuting",
+        "Buying Local Produce",
+        "Carpooling",
+        "Climate Action",
+        "Community Cleanup",
+        "Community Gardening",
+        "Community Projects",
+        "Composting",
+        "Conserving Electricity",
+        "DIY Projects",
+        "Donating Clothes",
+        "Donating Furniture",
+        "Eco-Friendly Products",
+        "Energy Efficient Technology",
+        "Energy Saving",
+        "Ethical Consumption",
+        "Food Sustainability",
+        "Gardening",
+        "Green Tech Adoption",
+        "Hard Rubbish Collecting",
+        "Public Transport",
+        "Rainwater Harvesting",
+        "Recycling Single Product",
+        "Recycling Many Products",
+        "Repair & Maintenance",
+        "Reusable Bags Use",
+        "Reusable Water Bottles",
+        "Smart Thermostat Use",
+        "Sustainable Fashion",
+        "Thrifting",
+        "Tree Planting",
+        "Upcycling",
+        "Urban Farming",
+        "Vegan Products",
+        "Vehicle Maintenance",
+        "Water Conservation",
+        "Waste Reduction",
+        "Wildlife Protection",
+        "Zero Waste"
+    ]
+
+    // MARK: - Points Mapping for Each Category
+    let categoryPoints: [String: Int] = [
+        "Alternative Energy Use": 30,
+        "Avoiding Single-Use Plastics": 20,
+        "Beach Cleanups": 45,
+        "Bike Commuting": 30,
+        "Buying Local Produce": 25,
+        "Carpooling": 25,
+        "Climate Action": 50,
+        "Community Cleanup": 30,
+        "Community Gardens": 40,
+        "Community Projects": 40,
+        "Composting": 20,
+        "Conserving Electricity": 15,
+        "DIY Projects": 25,
+        "Donating Clothes": 20,
+        "Donating Furniture": 30,
+        "Eco-Friendly Products": 15,
+        "Energy Efficient Technology": 10,
+        "Energy Saving": 30,
+        "Ethical Consumption": 20,
+        "Food Sustainability": 30,
+        "Gardening": 25,
+        "Green Tech Adoption": 60,
+        "Hard Rubbish Collecting": 40,
+        "Public Transport": 30,
+        "Rainwater Harvesting": 40,
+        "Recycling Single Product": 10,
+        "Recycling Many Products": 30,
+        "Repair & Maintenance": 25,
+        "Reusable Bags Use": 10,
+        "Reusable Water Bottles": 10,
+        "Smart Thermostat Use": 20,
+        "Sustainable Fashion": 30,
+        "Sustainable Transport": 35,
+        "Thrifting": 15,
+        "Tree Planting": 50,
+        "Upcycling": 25,
+        "Urban Farming": 40,
+        "Vegan Products": 10,
+        "Vehicle Maintenance": 20,
+        "Water Conservation": 30,
+        "Waste Reduction": 25,
+        "Wildlife Protection": 40,
+        "Zero Waste": 35
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,7 +118,7 @@ struct CreatePostView: View {
                 Image(systemName: "leaf.circle.fill")
                     .resizable()
                     .frame(width: 40, height: 40)
-                    .foregroundColor(.green)
+                    .foregroundColor(.darkgreen)
             }
             .padding()
             .background(Color.ggreen)
@@ -27,12 +128,29 @@ struct CreatePostView: View {
                     Text("What's on your mind?")
                         .font(.headline)
 
-                    TextEditor(text: $postText)
+                    TextEditor(text: $postText) // Post Text Input
                         .frame(height: 150)
                         .padding(8)
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(8)
 
+                    // Category Picker
+                    VStack(alignment: .leading) {
+                        Text("Select a Category")
+                            .font(.headline)
+                        Picker("Category", selection: $selectedCategory) {
+                            ForEach(categories, id: \.self) { category in
+                                Text(category).tag(category)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.palegreen)
+                        .cornerRadius(8)
+                    }
+
+                    // Photo Picker
                     PhotosPicker(selection: $selectedImage, matching: .images) {
                         HStack {
                             Image(systemName: "photo.on.rectangle")
@@ -44,7 +162,7 @@ struct CreatePostView: View {
                         .foregroundColor(.black)
                         .cornerRadius(8)
                     }
-
+                    // Preview of Selected Image
                     if let image = postImage {
                         Image(uiImage: image)
                             .resizable()
@@ -52,34 +170,147 @@ struct CreatePostView: View {
                             .frame(maxHeight: 200)
                             .cornerRadius(10)
                     }
-
-                    Button(action: {
-                        // Upload logic placeholder
-                        print("Post submitted")
-                    }) {
+                    // Upload Progress Indicator
+                    if isUploading {
+                        ProgressView("Posting...")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    // Error Message
+                    if let error = uploadError {
+                        Text("Error: \(error)")
+                            .foregroundColor(.red)
+                    }
+                    // Success Message
+                    if uploadSuccess {
+                        Text("Post uploaded successfully!")
+                            .foregroundColor(.green)
+                    }
+                    // Post Button
+                    Button(action: uploadPost) {
                         Text("Post")
                             .bold()
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color.darkgreen)
+                            .background((postText.isEmpty || selectedCategory.isEmpty || isUploading) ? Color.gray : Color.darkgreen)
                             .foregroundColor(.white)
                             .cornerRadius(10)
                     }
+                    .disabled(postText.isEmpty || selectedCategory.isEmpty || isUploading)
                 }
                 .padding()
             }
-
-           
         }
         .onChange(of: selectedImage) { newItem in
             Task {
                 if let data = try? await newItem?.loadTransferable(type: Data.self),
                    let uiImage = UIImage(data: data) {
-                    postImage = uiImage
+                    await MainActor.run {
+                        postImage = uiImage // Save selected image
+                    }
                 }
             }
         }
         .navigationBarHidden(true)
+    }
+
+    // MARK: - Upload Post Logic
+    private func uploadPost() {
+        guard let uid = Auth.auth().currentUser?.uid else { // Ensure user is logged in
+            uploadError = "User not authenticated"
+            return
+        }
+        guard !selectedCategory.isEmpty else { // Ensure category is selected
+            uploadError = "Please select a category"
+            return
+        }
+        isUploading = true
+        uploadError = nil
+        uploadSuccess = false // Reset states before upload
+
+        let postID = UUID().uuidString // Unique post ID
+        let points = categoryPoints[selectedCategory] ?? 0
+        let dbRef = Database.database().reference().child("posts").child(postID)
+
+        var postDict: [String: Any] = [ // Base post dictionary
+            "userID": uid,
+            "text": postText,
+            "category": selectedCategory,
+            "points": points,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+
+        if let image = postImage,
+           let imageData = image.jpegData(compressionQuality: 0.8) {
+            let storageRef = Storage.storage().reference().child("post_images/\(postID).jpg") // If there’s an image, upload to Firebase Storage first
+
+            storageRef.putData(imageData, metadata: nil) { metadata, error in
+                if let error = error {
+                    DispatchQueue.main.async {
+                        self.uploadError = "Storage error: \(error.localizedDescription)"
+                        self.isUploading = false
+                    }
+                    return
+                }
+
+                storageRef.downloadURL { url, error in // Get the image URL after upload
+                    guard let url = url else {
+                        DispatchQueue.main.async {
+                            self.uploadError = "Failed to retrieve image URL"
+                            self.isUploading = false
+                        }
+                        return
+                    }
+                    // Add image URL to post data
+                    postDict["imageUrl"] = url.absoluteString
+                    savePost(to: dbRef, postDict: postDict, points: points, userID: uid)
+                }
+            }
+        } else {
+            savePost(to: dbRef, postDict: postDict, points: points, userID: uid) // No image, save post directly
+        }
+    }
+    // MARK: - Save Post to Firebase Database
+    private func savePost(to ref: DatabaseReference, postDict: [String: Any], points: Int, userID: String) {
+        ref.setValue(postDict) { error, _ in
+            DispatchQueue.main.async {
+                self.isUploading = false
+                if let error = error {
+                    self.uploadError = "Database error: \(error.localizedDescription)"
+                    return
+                }
+                self.postText = "" // Reset UI
+                self.postImage = nil
+                self.uploadSuccess = true
+                print("Post uploaded successfully")
+
+                // Update user points & level
+                self.updateUserPoints(points: points, userID: userID)
+            }
+        }
+    }
+    // MARK: - Update User Points & Level
+    private func updateUserPoints(points: Int, userID: String) {
+        let userRef = Database.database().reference().child("users/\(userID)")
+
+        userRef.runTransactionBlock { currentData in
+            var user = currentData.value as? [String: Any] ?? [:]
+            let currentPoints = user["points"] as? Int ?? 0
+            let newPoints = currentPoints + points
+            user["points"] = newPoints
+
+            // Level formula: slower progression as points grow
+            let level = Int(floor(log2(Double(newPoints) / 100.0 + 1))) + 1
+            user["level"] = level
+
+            currentData.value = user
+            return TransactionResult.success(withValue: currentData)
+        } andCompletionBlock: { error, _, _ in
+            if let error = error {
+                print("Failed to update points: \(error.localizedDescription)")
+            } else {
+                print("User points and level updated successfully")
+            }
+        }
     }
 }
 
