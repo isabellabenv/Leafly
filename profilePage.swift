@@ -5,43 +5,50 @@ import FirebaseStorage
 import FirebaseDatabase
 import FirebaseDatabaseInternal
 
+// MARK: - Enum for navigation tabs
 enum SelectedTab {
     case home, addPost, profile
 }
 
+// MARK: - Post model
 struct Post: Identifiable {
-    let id: String
-    let userId: String
-    let text: String
-    let imageUrl: String?
-    let timestamp: Double
-    let category: String
-    let points: Int
-    var likes: Int                    // var
-    var commentsCount: Int            // var
-    var isLikedByCurrentUser: Bool    // var
+    let id: String  // Unique post ID
+    let userId: String // ID of user who made the post
+    let text: String // Post text content
+    let imageUrl: String? // Optional image URL
+    let timestamp: Double // Timestamp for when post was created
+    let category: String // Category label for the post
+    let points: Int // Points awarded for this post
+    var likes: Int // Number of likes (mutable)
+    var commentsCount: Int // Number of comments (mutable)
+    var isLikedByCurrentUser: Bool // Whether current user liked this post
 }
 
+// MARK: - Profile view
 struct ProfileView: View {
-    @State private var userPosts: [Post] = []
-    @State private var selectedTab: SelectedTab = .profile
-    @State private var showMenu = false
-    @State private var username: String = "Loading..."
-    @State private var profileImage: UIImage? = nil
-    @State private var profileImageUrl: URL? = nil
-    @State private var points: Int = 0
-    @State private var level: Int = 1
-    @State private var selectedItem: PhotosPickerItem?
-    @State private var selectedPostForComments: Post? = nil
-    @State private var showComments = false
+    // State variables for profile and post data
+    @State private var userPosts: [Post] = [] // Current user's posts
+    @State private var selectedTab: SelectedTab = .profile // Selected tab
+    @State private var showMenu = false // Show/hide menu
+    @State private var username: String = "Loading..." // Displayed username
+    @State private var profileImage: UIImage? = nil // Selected profile image
+    @State private var profileImageUrl: URL? = nil // URL to stored profile image
+    @State private var points: Int = 0 // User's total points
+    @State private var level: Int = 1 // User's level (calculated from points)
+    @State private var selectedItem: PhotosPickerItem? // Picked image from photo library
+    @State private var selectedPostForComments: Post? = nil // Selected post for comment view
+    @State private var showComments = false // Whether comments sheet is showing
+    @State private var followersCount: Int = 0 // Follower count
+    @State private var followingCount: Int = 0 // Following count
+    
 
-
-    // Progress bar
+    // MARK: - Progress bar logic
+        // Calculates progress toward next level based on points
     private var progressValue: Double {
         let currentLevelPoints = (level - 1) * 100
         let nextLevelPoints = level * 100
         let progress = Double(points - currentLevelPoints) / Double(nextLevelPoints - currentLevelPoints)
-        return min(max(progress, 0), 1)
+        return min(max(progress, 0), 1) // Limit between 0 and 1
     }
 
     var body: some View {
@@ -51,15 +58,15 @@ struct ProfileView: View {
                 case .home: HomeView()
                 case .addPost: CreatePostView()
                 case .profile: profileContent
-                }
+                } // Switch between main app tabs
             }
-            .toolbar {
+            .toolbar {  // Bottom tab bar
                 ToolbarItemGroup(placement: .bottomBar) {
                     Spacer(minLength: 20)
                     Button(action: { selectedTab = .home }) {
                         Image(systemName: "house")
                             .font(.system(size: 30))
-                            .foregroundColor(selectedTab == .home ? .green : .gray)
+                            .foregroundColor(selectedTab == .home ? .ggreen : .gray)
                     }
                     Spacer()
                     Button(action: { selectedTab = .addPost }) {
@@ -72,33 +79,36 @@ struct ProfileView: View {
                     Button(action: { selectedTab = .profile }) {
                         Image(systemName: "person.crop.circle")
                             .font(.system(size: 30))
-                            .foregroundColor(selectedTab == .profile ? .green : .gray)
+                            .foregroundColor(selectedTab == .profile ? .ggreen : .gray)
                     }
                     Spacer(minLength: 20)
                 }
             }
         }
-        .task {
+        .task { // Load data when view appears
             await loadProfileData()
-            await loadUserPosts()       // Initial load
-            observeUserPosts()          // Live updates
+                await loadUserPosts()
+                await loadFollowCounts()
+                observeUserPosts()
+                observeFollowCounts()
         }
-        .refreshable {
+        .refreshable { // Pull-to-refresh handler
             await loadProfileData()
             await loadUserPosts()
         }
-        .sheet(isPresented: $showMenu) { MenuView() }
+        .sheet(isPresented: $showMenu) { MenuView() } // Menu sheet
     }
-
+    
+    // MARK: - Profile Content
     var profileContent: some View {
         VStack(spacing: 0) {
-            // --- Header ---
+            // Profile Header
             VStack {
                 HStack {
-                    PhotosPicker(selection: $selectedItem, matching: .images) {
+                    PhotosPicker(selection: $selectedItem, matching: .images) { // Profile image picker
                         if let image = profileImage {
-                            Image(uiImage: image).resizable().scaledToFill().frame(width: 80, height: 80).clipShape(Circle())
-                        } else if let url = profileImageUrl {
+                            Image(uiImage: image).resizable().scaledToFill().frame(width: 80, height: 80).clipShape(Circle()) // Show selected image
+                        } else if let url = profileImageUrl { // Show stored image from URL
                             AsyncImage(url: url) { phase in
                                 switch phase {
                                 case .empty: ProgressView().frame(width: 80, height: 80)
@@ -110,14 +120,14 @@ struct ProfileView: View {
                         } else {
                             Circle().fill(Color.gray.opacity(0.3)).frame(width: 80, height: 80)
                                 .overlay(Image(systemName: "person.crop.circle").font(.system(size: 40)).foregroundColor(.white))
-                        }
+                        } // Placeholder image
                     }
                     .onChange(of: selectedItem) { newItem in
-                        if let item = newItem { Task { await loadImage(from: item) } }
+                        if let item = newItem { Task { await loadImage(from: item) } } // When new image is selected
                     }
                     .padding(.horizontal)
 
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 6) {  // Username, progress bar, and points display
                         Text(username).font(.headline)
                         ProgressView(value: progressValue).progressViewStyle(LinearProgressViewStyle(tint: .green)).frame(width: 120)
                         HStack(spacing: 8) {
@@ -127,26 +137,26 @@ struct ProfileView: View {
                         }
                     }
                     Spacer()
-                    Button(action: { showMenu.toggle() }) { Label("", systemImage: "ellipsis") }.padding()
+                    Button(action: { showMenu.toggle() }) { Label("", systemImage: "ellipsis") }.padding() // Menu button
                 }
 
-                HStack {
+                HStack { // Follower / Following counts
                     Spacer()
-                    VStack { Text("232").bold(); Text("Followers").font(.caption) }
+                    VStack { Text("\(followersCount)").bold(); Text("Followers").font(.caption) }
                     Spacer()
-                    VStack { Text("2124").bold(); Text("Following").font(.caption) }
+                    VStack { Text("\(followingCount)").bold(); Text("Following").font(.caption) }
                     Spacer()
                 }
                 .padding(.bottom, 10)
             }
             .background(Color.ggreen)
 
-            // --- Posts ---
+            // User Posts
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(userPosts) { post in
                         VStack(alignment: .leading, spacing: 8) {
-                            if let urlString = post.imageUrl, let url = URL(string: urlString) {
+                            if let urlString = post.imageUrl, let url = URL(string: urlString) { // Post image
                                 AsyncImage(url: url) { phase in
                                     switch phase {
                                     case .empty: ProgressView()
@@ -156,14 +166,13 @@ struct ProfileView: View {
                                     }
                                 }
                             }
-                            Text(post.text).font(.body)
-                            HStack {
+                            Text(post.text).font(.body) // Post text
+                            HStack { // Category and points
                                 Text(post.category).font(.caption).foregroundColor(.secondary)
                                 Spacer()
                                 Text("+\(post.points) pts").font(.caption).foregroundColor(.green)
                             }
-                            // --- NEW: Likes & Comments row ---
-                            HStack(spacing: 16) {
+                            HStack(spacing: 16) { // Likes & comments row
                                 Label("\(post.likes)", systemImage: post.isLikedByCurrentUser ? "hand.thumbsup.fill" : "hand.thumbsup")
                                     .font(.caption)
                                     .foregroundColor(post.isLikedByCurrentUser ? .blue : .gray)
@@ -173,7 +182,7 @@ struct ProfileView: View {
                                 
                                 NavigationLink(destination: CommentsView(postId: post.id)
                                     .onDisappear {
-                                        Task { await loadUserPosts() } // refresh post counts when returning
+                                        Task { await loadUserPosts() } // Refresh posts after returning from comments
                                     }
                                 ) {
                                     Label("\(post.commentsCount)", systemImage: "bubble.right")
@@ -181,9 +190,8 @@ struct ProfileView: View {
                                         .foregroundColor(.gray)
                                 }
                             }
-                            // ---
                             Text(Date(timeIntervalSince1970: post.timestamp).formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption2).foregroundColor(.gray)
+                                .font(.caption2).foregroundColor(.gray) // Timestamp
                         }
                         .padding().background(Color.white).cornerRadius(10).shadow(radius: 1)
                     }
@@ -192,13 +200,13 @@ struct ProfileView: View {
                 .sheet(isPresented: $showComments) {
                     if let post = selectedPostForComments {
                         CommentsView(postId: post.id)
-                    }
+                    } // Sheet for comments view
                 }
             }
         }
     }
 
-    // MARK: - Load Profile
+    // MARK: - Load profile info from Firebase
     private func loadProfileData() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let ref = Database.database().reference().child("users").child(uid)
@@ -208,17 +216,17 @@ struct ProfileView: View {
                 await MainActor.run {
                     username = userData["username"] as? String ?? "Unknown"
                     points = userData["points"] as? Int ?? 0
-                    level = calculateLevel(for: points) // 🔥 Dynamically calculate
+                    level = calculateLevel(for: points) // Calculate level from points
                 }
             }
             await loadProfileImageURL()
         } catch { print("Failed to load profile data: \(error.localizedDescription)") }
     }
     private func calculateLevel(for points: Int) -> Int {
-        return (points / 100) + 1  // Every 100 points = +1 level
+        return (points / 100) + 1      // Calculate level from points (100 pts per level)
     }
 
-    private func loadProfileImageURL() async {
+    private func loadProfileImageURL() async { // Load profile image URL from Firebase
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let dbRef = Database.database().reference().child("users/\(uid)/profileImageUrl")
         do {
@@ -229,7 +237,7 @@ struct ProfileView: View {
         } catch { print("Failed to load profile image URL: \(error.localizedDescription)") }
     }
 
-    // MARK: - Initial Posts Load
+    // MARK: - Load user's posts
     private func loadUserPosts() async {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let ref = Database.database().reference().child("posts")
@@ -240,7 +248,7 @@ struct ProfileView: View {
                 if let snap = child as? DataSnapshot,
                    let data = snap.value as? [String: Any],
                    let userId = data["userID"] as? String, userId == uid {
-                    posts.append(Post(
+                    posts.append(Post( // Create Post object from Firebase data
                         id: snap.key,
                         userId: userId,
                         text: data["text"] as? String ?? "",
@@ -254,13 +262,13 @@ struct ProfileView: View {
                     ))
                 }
             }
-            await MainActor.run { self.userPosts = posts.sorted { $0.timestamp > $1.timestamp } }
+            await MainActor.run { self.userPosts = posts.sorted { $0.timestamp > $1.timestamp } } // Sort posts by timestamp
         } catch {
             print("Failed to load posts: \(error.localizedDescription)")
         }
     }
 
-    // MARK: - Observe for Live Updates
+    // MARK: - Observe live post updates from Firebase
     private func observeUserPosts() {
         guard let currentUserID = Auth.auth().currentUser?.uid else { return }
         let ref = Database.database().reference().child("posts")
@@ -292,7 +300,7 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Upload Profile Image
+    // MARK: - Upload and set profile image
     private func loadImage(from item: PhotosPickerItem) async {
         do {
             if let data = try await item.loadTransferable(type: Data.self),
@@ -315,7 +323,7 @@ struct ProfileView: View {
             await MainActor.run { profileImageUrl = downloadURL }
         } catch { print("Upload failed: \(error.localizedDescription)") }
     }
-    // MARK: - Toggle Like
+    // MARK: - Like/unlike post
     private func toggleLike(for post: Post) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let postRef = Database.database().reference().child("posts/\(post.id)")
@@ -328,12 +336,11 @@ struct ProfileView: View {
         }
         updatedPost.isLikedByCurrentUser.toggle()
         
-        // Optimistically update UI
         if let index = userPosts.firstIndex(where: { $0.id == post.id }) {
             userPosts[index] = updatedPost
         }
         
-        // Update in Firebase
+        // Update Firebase data with transaction
         postRef.runTransactionBlock { currentData in
             if var postData = currentData.value as? [String: Any] {
                 var likes = postData["likes"] as? Int ?? 0
@@ -352,107 +359,181 @@ struct ProfileView: View {
             return TransactionResult.success(withValue: currentData)
         }
     }
-}
-struct CommentsView: View {
-    let postId: String
-    @State private var comments: [Comment] = []
-    @State private var newComment: String = ""
     
-    struct Comment: Identifiable {
-        let id: String
-        let userId: String
-        let username: String
-        let text: String
-        let timestamp: Double
-    }
-    
-    var body: some View {
-        VStack {
-            List(comments) { comment in
-                VStack(alignment: .leading) {
-                    Text(comment.username).font(.caption).bold()
-                    Text(comment.text).font(.body)
-                    Text(Date(timeIntervalSince1970: comment.timestamp)
-                        .formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption2).foregroundColor(.gray)
+    // MARK: - Load and observe follow counts
+    private func loadFollowCounts() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let ref = Database.database().reference().child("users").child(uid)
+        do {
+            let snapshot = try await ref.getData()
+            if let userData = snapshot.value as? [String: Any] {
+                let followers = userData["followers"] as? [String: Bool] ?? [:]
+                let following = userData["following"] as? [String: Bool] ?? [:]
+                await MainActor.run {
+                    self.followersCount = followers.count
+                    self.followingCount = following.count
                 }
             }
-            
+        } catch {
+            print("Failed to load follow counts: \(error.localizedDescription)")
+        }
+    }
+    private func observeFollowCounts() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let ref = Database.database().reference().child("users").child(uid)
+        
+        ref.observe(.value) { snapshot in
+            if let userData = snapshot.value as? [String: Any] {
+                let followers = userData["followers"] as? [String: Bool] ?? [:]
+                let following = userData["following"] as? [String: Bool] ?? [:]
+                DispatchQueue.main.async {
+                    self.followersCount = followers.count
+                    self.followingCount = following.count
+                }
+            }
+        }
+    }
+}
+// MARK: - Comment Model
+struct Comment: Identifiable {
+    let id: String // Unique Firebase comment ID
+    let userId: String // ID of the user who posted the comment
+    let username: String // Display name of the user
+    let userProfileUrl: String? // Optional profile image URL
+    let text: String // Comment content
+    let timestamp: Double // Rimestamp of comment creation
+}
+// MARK: - Comments View
+struct CommentsView: View {
+    let postId: String // The ID of the post that is having comments displayed
+    @State private var comments: [Comment] = [] // All comments for this post
+    @State private var newComment: String = "" // Text input for new comment
+    @State private var isLoading = true // Show loading state until comments are fetched
+
+    var body: some View {
+        VStack {
+            if isLoading { // Loading and Empty States
+                ProgressView("Loading comments...")
+                    .padding()
+            } else if comments.isEmpty {
+                Text("No comments yet.")
+                    .foregroundColor(.gray)
+                    .padding()
+            } else {
+                // MARK: - Display Comments
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(comments) { comment in
+                            HStack(alignment: .top, spacing: 10) {
+                                if let url = comment.userProfileUrl.flatMap(URL.init) { // Profile Image
+                                    AsyncImage(url: url) { image in
+                                        image.resizable()
+                                    } placeholder: {
+                                        Circle().fill(Color.gray.opacity(0.3))
+                                    }
+                                    .frame(width: 40, height: 40)
+                                    .clipShape(Circle())
+                                } else {
+                                    Circle()
+                                        .fill(Color.gray.opacity(0.3))
+                                        .frame(width: 40, height: 40)
+                                        .overlay(Image(systemName: "person.fill").foregroundColor(.white))
+                                }
+                                
+                                VStack(alignment: .leading, spacing: 4) { // Comment Content
+                                    Text(comment.username)
+                                        .font(.subheadline)
+                                        .bold()
+                                    Text(comment.text)
+                                        .font(.body)
+                                    Text(Date(timeIntervalSince1970: comment.timestamp)
+                                        .formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                }
+            }
+            Spacer()
+
+            // MARK: - Input Field for New Comment
             HStack {
                 TextField("Add a comment...", text: $newComment)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                Button("Send") {
-                    Task { await addComment() }
+                Button(action: postComment) {
+                    Text("Send").bold()
                 }
-                .disabled(newComment.isEmpty)
+                .disabled(newComment.isEmpty) // Disable send button if empty
             }
             .padding()
         }
+        .navigationTitle("Comments")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            Task { await loadComments() }
+            observeComments()
         }
     }
-    
-    private func loadComments() async {
-        let ref = Database.database().reference().child("posts/\(postId)/comments")
-        do {
-            let snapshot = try await ref.getData()
-            var loaded: [Comment] = []
-            for child in snapshot.children {
-                if let snap = child as? DataSnapshot,
-                   let data = snap.value as? [String: Any] {
-                    loaded.append(Comment(
-                        id: snap.key,
-                        userId: data["userId"] as? String ?? "",
-                        username: data["username"] as? String ?? "Unknown",
-                        text: data["text"] as? String ?? "",
-                        timestamp: data["timestamp"] as? Double ?? 0
-                    ))
+    // MARK: - Fetch and Listen for Comments
+    private func observeComments() {
+        let ref = Database.database().reference()
+            .child("posts").child(postId).child("comments")
+        
+        ref.observe(.value) { snapshot in
+            var fetched: [Comment] = []
+            let group = DispatchGroup()  // Ensure all user data is fetched before updating UI
+            
+            for case let child as DataSnapshot in snapshot.children {  // Fetch user info for each comment
+                if let data = child.value as? [String: Any],
+                   let userId = data["userID"] as? String,
+                   let text = data["text"] as? String,
+                   let timestamp = data["timestamp"] as? Double {
+                    
+                    group.enter()
+                    Database.database().reference().child("users").child(userId)
+                        .observeSingleEvent(of: .value) { userSnapshot in
+                            let userData = userSnapshot.value as? [String: Any]
+                            let username = userData?["username"] as? String ?? "Unknown"
+                            let profileImageUrl = userData?["profileImageUrl"] as? String
+                            
+                            let comment = Comment(
+                                id: child.key,
+                                userId: userId,
+                                username: username,
+                                userProfileUrl: profileImageUrl,
+                                text: text,
+                                timestamp: timestamp
+                            )
+                            fetched.append(comment)
+                            group.leave()
+                        }
                 }
             }
-            await MainActor.run {
-                comments = loaded.sorted { $0.timestamp < $1.timestamp }
+            
+            // Once all user data is loaded, update UI
+            group.notify(queue: .main) {
+                self.comments = fetched.sorted { $0.timestamp < $1.timestamp }
+                self.isLoading = false
             }
-        } catch {
-            print("Failed to load comments: \(error.localizedDescription)")
         }
     }
-    
-    private func addComment() async {
+    // MARK: - Post a New Comment
+    private func postComment() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        let userRef = Database.database().reference().child("users/\(uid)/username")
-        let usernameSnapshot = try? await userRef.getData()
-        let username = usernameSnapshot?.value as? String ?? "User"
+        let ref = Database.database().reference()
+            .child("posts").child(postId).child("comments").childByAutoId()
         
-        let postRef = Database.database().reference().child("posts/\(postId)")
-        let commentRef = postRef.child("comments").childByAutoId()
-        
-        let commentData: [String: Any] = [
-            "userId": uid,
-            "username": username,
+        let data: [String: Any] = [
+            "userID": uid,
             "text": newComment,
             "timestamp": Date().timeIntervalSince1970
         ]
         
-        do {
-            // Add comment
-            try await commentRef.setValue(commentData)
-            
-            // Increment commentsCount
-            try await postRef.runTransactionBlock { currentData in
-                if var postData = currentData.value as? [String: Any] {
-                    var commentsCount = postData["commentsCount"] as? Int ?? 0
-                    commentsCount += 1
-                    postData["commentsCount"] = commentsCount
-                    currentData.value = postData
-                }
-                return TransactionResult.success(withValue: currentData)
-            }
-            
-            await MainActor.run { newComment = "" } // Clear input
-        } catch {
-            print("Failed to add comment: \(error.localizedDescription)")
-        }
+        ref.setValue(data)
+        newComment = "" // Clear input after posting
     }
 }
 
