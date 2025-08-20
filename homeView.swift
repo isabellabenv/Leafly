@@ -8,14 +8,23 @@ struct PostWithUser: Identifiable {
     let username: String
     let userProfileUrl: String?
 }
+struct UserSearchResult: Identifiable {
+    let id: String
+    let username: String
+    let profileImageUrl: String?
+}
 
 struct HomeView: View {
     @State private var posts: [PostWithUser] = []
     @State private var isLoading = true
     @StateObject private var postService = PostService.shared
     @StateObject private var followService = FollowService.shared
-
-
+    //Search State
+    @State private var searchQuery = ""
+    @State private var searchResults: [UserSearchResult] = []
+    @State private var isSearching = false
+    
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -26,6 +35,23 @@ struct HomeView: View {
                             .font(.title)
                             .bold()
                     }
+                    HStack {
+                        TextField("Search users...", text: $searchQuery, onCommit: {
+                            searchUsers(query: searchQuery)
+                        })
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .padding(.horizontal)
+                        .onChange(of: searchQuery) { newValue in
+                            searchUsers(query: newValue)
+                        }
+                        
+                        if isSearching {
+                            ProgressView()
+                                .padding(.trailing)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    
                     Spacer()
                     NavigationLink(destination: LeaderboardView()) {
                         Image(systemName: "list.number")
@@ -40,25 +66,53 @@ struct HomeView: View {
                 }
                 .padding()
                 .background(Color.ggreen)
+                // 🔍 Search Bar
+                
+                // Search Results
+                if !searchResults.isEmpty {
+                    List(searchResults) { user in
+                        NavigationLink(destination: OtherUserProfileView(userId: user.id)) {
+                            HStack {
+                                if let url = user.profileImageUrl, let imageURL = URL(string: url) {
+                                    AsyncImage(url: imageURL) { image in
+                                        image.resizable()
+                                    } placeholder: {
+                                        Circle().fill(Color.gray.opacity(0.3))
+                                    }
+                                    .frame(width: 40, height: 40)
+                                    .clipShape(Circle())
+                                } else {
+                                    Circle()
+                                        .fill(Color.gray.opacity(0.3))
+                                        .frame(width: 40, height: 40)
+                                }
 
-
-                // Posts Feed
-
-                if postService.posts.isEmpty {
-                    ProgressView("Loading posts...").padding()
-                } else {
-                    ScrollView {
-                        VStack(spacing: 16) {
-                            ForEach(postService.posts) { postWithUser in
-                                PostCardView(
-                                    postWithUser: postWithUser,
-                                    onLike: { postService.toggleLike(postID: postWithUser.post.id) },
-                                    onFollow: { followService.toggleFollow(userId: postWithUser.post.userId) }
-                                )
-                                .environmentObject(followService) // pass follow service down
+                                Text(user.username)
+                                    .font(.headline)
                             }
                         }
-                        .padding()
+                    }
+                    .listStyle(PlainListStyle())
+                } else {
+                    
+                    // Posts Feed
+                    
+                    if postService.posts.isEmpty {
+                        ProgressView("Loading posts...").padding()
+                    } else {
+                        ScrollView {
+                            VStack(spacing: 16) {
+                                ForEach(postService.posts) { postWithUser in
+                                    PostCardView(
+                                        postWithUser: postWithUser,
+                                        onLike: { postService.toggleLike(postID: postWithUser.post.id) },
+                                        onFollow: { followService.toggleFollow(userId: postWithUser.post.userId) }
+                                    )
+                                    .environmentObject(followService) // pass follow service down
+                                }
+                            }
+                            .padding()
+                        }
                     }
                 }
             }
@@ -71,29 +125,66 @@ struct HomeView: View {
             await loadPosts()
         }
     }
+    // MARK: - Search Users
+    private func searchUsers(query: String) {
+        guard !query.isEmpty else {
+            searchResults = []
+            return
+        }
 
+        let lowercaseQuery = query.lowercased()
+        let usersRef = Database.database().reference().child("users")
+
+        // Fetch all users
+        usersRef.observeSingleEvent(of: .value) { snapshot in
+            var results: [UserSearchResult] = []
+
+            for child in snapshot.children {
+                if let childSnapshot = child as? DataSnapshot,
+                   let data = childSnapshot.value as? [String: Any],
+                   let username = data["username"] as? String {
+
+                    // Case-insensitive match
+                    if username.lowercased().contains(lowercaseQuery) {
+                        let profileImageUrl = data["profileImageUrl"] as? String
+                        let user = UserSearchResult(
+                            id: childSnapshot.key,
+                            username: username,
+                            profileImageUrl: profileImageUrl
+                        )
+                        results.append(user)
+                    }
+                }
+            }
+
+            DispatchQueue.main.async {
+                self.searchResults = results
+                print("Total results: \(results.count)")
+            }
+        }
+    }
     // MARK: - Load Posts
     private func loadPosts() async {
         guard let currentUserID = Auth.auth().currentUser?.uid else { return }
         let postsRef = Database.database().reference().child("posts")
-
+        
         do {
             let snapshot = try await postsRef.getData()
             var fetchedPosts: [PostWithUser] = []
-
+            
             for case let child as DataSnapshot in snapshot.children {
                 guard let data = child.value as? [String: Any],
                       let userId = data["userID"] as? String else { continue }
-
+                
                 // Fetch user data
                 let userRef = Database.database().reference().child("users").child(userId)
                 let userSnapshot = try await userRef.getData()
                 let userData = userSnapshot.value as? [String: Any]
-
+                
                 // Explicitly annotate types
                 let username: String = userData?["username"] as? String ?? "Unknown"
                 let profileImageUrl: String? = userData?["profileImageUrl"] as? String
-
+                
                 // Build Post
                 let post = Post(
                     id: child.key,
@@ -107,7 +198,7 @@ struct HomeView: View {
                     commentsCount: data["commentsCount"] as? Int ?? 0,
                     isLikedByCurrentUser: (data["likedBy"] as? [String: Bool])?[currentUserID] ?? false
                 )
-
+                
                 fetchedPosts.append(PostWithUser(
                     id: child.key,
                     post: post,
@@ -115,13 +206,13 @@ struct HomeView: View {
                     userProfileUrl: profileImageUrl
                 ))
             }
-
+            
             fetchedPosts.shuffle() // random order
             await MainActor.run {
                 self.posts = fetchedPosts
                 self.isLoading = false
             }
-
+            
         } catch {
             print("Failed to load posts: \(error.localizedDescription)")
             await MainActor.run { self.isLoading = false }
@@ -138,13 +229,13 @@ struct HomeView: View {
         postsRef.observe(.childAdded) { snapshot in
             guard let data = snapshot.value as? [String: Any],
                   let userId = data["userID"] as? String else { return }
-
+            
             Database.database().reference().child("users").child(userId)
                 .observeSingleEvent(of: .value) { userSnapshot in
                     let userData = userSnapshot.value as? [String: Any]
                     let username = userData?["username"] as? String ?? "Unknown"
                     let profileImageUrl = userData?["profileImageUrl"] as? String
-
+                    
                     let post = Post(
                         id: snapshot.key,
                         userId: userId,
@@ -157,14 +248,14 @@ struct HomeView: View {
                         commentsCount: data["commentsCount"] as? Int ?? 0,
                         isLikedByCurrentUser: (data["likedBy"] as? [String: Bool])?[currentUserID] ?? false
                     )
-
+                    
                     let postWithUser = PostWithUser(
                         id: snapshot.key,
                         post: post,
                         username: username,
                         userProfileUrl: profileImageUrl
                     )
-
+                    
                     DispatchQueue.main.async {
                         if !self.posts.contains(where: { $0.id == postWithUser.id }) {
                             self.posts.insert(postWithUser, at: 0)
@@ -174,7 +265,7 @@ struct HomeView: View {
                     }
                 }
         }
-
+        
         // Live update for likes/comments
         postsRef.observe(.childChanged) { snapshot in
             guard let updatedData = snapshot.value as? [String: Any] else { return }
@@ -219,16 +310,16 @@ struct HomeView: View {
     private func followUser(targetUserId: String) {
         guard let currentUserId = Auth.auth().currentUser?.uid else { return }
         if currentUserId == targetUserId { return } // can't follow yourself
-
+        
         let usersRef = Database.database().reference().child("users")
-
+        
         // Increment current user's following count
         usersRef.child(currentUserId).child("followingCount").runTransactionBlock { data in
             var count = data.value as? Int ?? 0
             data.value = count + 1
             return .success(withValue: data)
         }
-
+        
         // Increment target user's followers count
         usersRef.child(targetUserId).child("followersCount").runTransactionBlock { data in
             var count = data.value as? Int ?? 0
@@ -381,13 +472,28 @@ struct PostCardView: View {
         }
     }
 }
+
 struct LeaderboardView: View {
     @State private var leaderboard: [(uid: String, username: String, profileImageUrl: String?, points: Int)] = []
+    @State private var allUsers: [(uid: String, username: String, profileImageUrl: String?, points: Int)] = []
     @State private var isLoading = true
     @State private var currentUserId: String?
+    @State private var followingIds: [String] = []
+    @State private var filterOption: String = "All"
     
     var body: some View {
         VStack {
+            // Filter Picker
+            Picker("Filter", selection: $filterOption) {
+                Text("All").tag("All")
+                Text("Following").tag("Following")
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .onChange(of: filterOption) { _ in
+                applyFilter()
+            }
+            
             if isLoading {
                 ProgressView("Loading leaderboard...")
                     .padding()
@@ -400,7 +506,6 @@ struct LeaderboardView: View {
                         leaderboardRow(index: index, user: user)
                     }
                     
-                    // Show current user's rank if they're not in top 10
                     if let currentId = currentUserId,
                        let myIndex = leaderboard.firstIndex(where: { $0.uid == currentId }),
                        myIndex >= 10 {
@@ -411,55 +516,62 @@ struct LeaderboardView: View {
                         }
                     }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
         .navigationTitle("Leaderboard")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             currentUserId = Auth.auth().currentUser?.uid
+            loadFollowingIds()
             loadLeaderboard()
         }
     }
     
     @ViewBuilder
     private func leaderboardRow(index: Int, user: (uid: String, username: String, profileImageUrl: String?, points: Int)) -> some View {
-        HStack {
-            Text("\(index + 1)")
-                .font(.headline)
-                .frame(width: 30)
-            
-            if let urlString = user.profileImageUrl, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty: ProgressView().frame(width: 40, height: 40)
-                    case .success(let image): image.resizable().scaledToFill().frame(width: 40, height: 40).clipShape(Circle())
-                    case .failure: Circle().fill(Color.green.opacity(0.3)).frame(width: 40, height: 40).overlay(Image(systemName: "person.fill").foregroundColor(.white))
-                    @unknown default: EmptyView()
-                    }
-                }
-            } else {
-                Circle()
-                    .fill(Color.green.opacity(0.3))
-                    .frame(width: 40, height: 40)
-                    .overlay(Image(systemName: "person.fill").foregroundColor(.white))
-            }
-            
-            VStack(alignment: .leading) {
-                Text(user.username)
+        NavigationLink(destination: OtherUserProfileView(userId: user.uid)) {
+            HStack {
+                Text("\(index + 1)")
                     .font(.headline)
-                Text("\(user.points) Green Points")
-                    .font(.caption)
-                    .foregroundColor(.green)
+                    .frame(width: 30)
+                
+                if let urlString = user.profileImageUrl, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty: ProgressView().frame(width: 40, height: 40)
+                        case .success(let image): image.resizable().scaledToFill().frame(width: 40, height: 40).clipShape(Circle())
+                        case .failure: Circle().fill(Color.green.opacity(0.3)).frame(width: 40, height: 40).overlay(Image(systemName: "person.fill").foregroundColor(.white))
+                        @unknown default: EmptyView()
+                        }
+                    }
+                } else {
+                    Circle()
+                        .fill(Color.green.opacity(0.3))
+                        .frame(width: 40, height: 40)
+                        .overlay(Image(systemName: "person.fill").foregroundColor(.white))
+                }
+                
+                VStack(alignment: .leading) {
+                    Text(user.username)
+                        .font(.headline)
+                    Text("\(user.points) Green Points")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+                Spacer()
             }
-            Spacer()
+            .padding(.vertical, 4)
+            .background(user.uid == currentUserId ? Color.yellow.opacity(0.2) : Color.clear)
+            .cornerRadius(8)
         }
-        .padding(.vertical, 4)
-        .background(
-            user.uid == currentUserId ? Color.yellow.opacity(0.2) : Color.clear
-        )
-        .cornerRadius(8)
     }
     
     private func loadLeaderboard() {
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        self.currentUserId = currentUserId
+        
         let usersRef = Database.database().reference().child("users")
         
         usersRef.observeSingleEvent(of: .value) { snapshot in
@@ -469,19 +581,62 @@ struct LeaderboardView: View {
                 guard let userData = child.value as? [String: Any] else { continue }
                 let username = userData["username"] as? String ?? "Unknown"
                 let profileImageUrl = userData["profileImageUrl"] as? String
-                let points = userData["greenPoints"] as? Int ?? 0
+                
+                // --- FIX: Load greenPoints from any type ---
+                let pointsValue = userData["points"]
+                let points: Int
+                if let p = pointsValue as? Int {
+                    points = p
+                } else if let p = pointsValue as? Double {
+                    points = Int(p)
+                } else if let p = pointsValue as? String, let intP = Int(p) {
+                    points = intP
+                } else {
+                    points = 0
+                }
+                
                 fetchedLeaderboard.append((child.key, username, profileImageUrl, points))
             }
             
             fetchedLeaderboard.sort { $0.3 > $1.3 } // Sort by points descending
             
             DispatchQueue.main.async {
-                self.leaderboard = fetchedLeaderboard
+                self.allUsers = fetchedLeaderboard
+                self.applyFilter()
                 self.isLoading = false
             }
         }
     }
+    
+    private func loadFollowingIds() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let followingRef = Database.database().reference()
+            .child("users").child(uid).child("following")
+        
+        followingRef.observeSingleEvent(of: .value) { snapshot in
+            var ids: [String] = []
+            for child in snapshot.children {
+                if let snap = child as? DataSnapshot {
+                    ids.append(snap.key)
+                }
+            }
+            DispatchQueue.main.async {
+                self.followingIds = ids
+                applyFilter()
+            }
+        }
+    }
+    
+    private func applyFilter() {
+        if filterOption == "Following" {
+            leaderboard = allUsers.filter { followingIds.contains($0.uid) || $0.uid == currentUserId }
+        } else {
+            leaderboard = allUsers
+        }
+    }
 }
+
+
 
 #Preview {
     HomeView()
