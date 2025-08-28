@@ -5,12 +5,12 @@ import FirebaseStorage
 import FirebaseDatabase
 import FirebaseDatabaseInternal
 
-// MARK: - Enum for navigation tabs
+// MARK: - Enum for navigation tabs, determines the active view
 enum SelectedTab {
     case home, addPost, profile
 }
 
-// MARK: - Post model
+// MARK: - Post model, identifies the information of each post
 struct Post: Identifiable {
     let id: String  // Unique post ID
     let userId: String // ID of user who made the post
@@ -96,7 +96,7 @@ struct ProfileView: View {
             await loadProfileData()
             await loadUserPosts()
         }
-        .sheet(isPresented: $showMenu) { MenuView() } // Menu sheet
+        .sheet(isPresented: $showMenu) { MenuView() } // Menu sheet appears
     }
     
     // MARK: - Profile Content
@@ -113,17 +113,35 @@ struct ProfileView: View {
                                 switch phase {
                                 case .empty: ProgressView().frame(width: 80, height: 80)
                                 case .success(let image): image.resizable().scaledToFill().frame(width: 80, height: 80).clipShape(Circle())
-                                case .failure: Image(systemName: "person.crop.circle.badge.exclamationmark").resizable().scaledToFit().frame(width: 80, height: 80).foregroundColor(.gray)
+                                case .failure: Image(systemName: "person.crop.circle.badge.exclamationmark").resizable().scaledToFit().frame(width: 80, height: 80).foregroundColor(.gray) //Placeholder image if the image uploaded fails to be retrieved
                                 @unknown default: EmptyView()
                                 }
                             }
                         } else {
-                            Circle().fill(Color.gray.opacity(0.3)).frame(width: 80, height: 80)
-                                .overlay(Image(systemName: "person.crop.circle").font(.system(size: 40)).foregroundColor(.white))
-                        } // Placeholder image
+                            ZStack(alignment: .bottomTrailing) {
+                                Circle()
+                                    .fill(Color.gray.opacity(0.3))
+                                    .frame(width: 80, height: 80)
+                                    .overlay(
+                                        Image(systemName: "person.crop.circle")
+                                            .font(.system(size: 40))
+                                            .foregroundColor(.white)
+                                    )
+
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 24, height: 24)
+                                    .overlay(
+                                        Image(systemName: "plus")
+                                            .foregroundColor(.white)
+                                            .font(.system(size: 14, weight: .bold))
+                                    )
+                                    .offset(x: 4, y: 4)
+                            }
+                        } // Placeholder image for when users are yet to upload their own image, displaying a default circle with a "+" icon to indicate the customisability
                     }
                     .onChange(of: selectedItem) { newItem in
-                        if let item = newItem { Task { await loadImage(from: item) } } // When new image is selected
+                        if let item = newItem { Task { await loadImage(from: item) } } // When new image is selected, the profile image will be loaded again
                     }
                     .padding(.horizontal)
 
@@ -208,7 +226,7 @@ struct ProfileView: View {
 
     // MARK: - Load profile info from Firebase
     private func loadProfileData() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return } // Ensures user is authenticated before continuing
         let ref = Database.database().reference().child("users").child(uid)
         do {
             let snapshot = try await ref.getData()
@@ -227,7 +245,7 @@ struct ProfileView: View {
     }
 
     private func loadProfileImageURL() async { // Load profile image URL from Firebase
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return } // Ensures user is authenticated before continuing
         let dbRef = Database.database().reference().child("users/\(uid)/profileImageUrl")
         do {
             let snapshot = try await dbRef.getData()
@@ -239,7 +257,7 @@ struct ProfileView: View {
 
     // MARK: - Load user's posts
     private func loadUserPosts() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return } // Ensures user is authenticated before continuing
         let ref = Database.database().reference().child("posts")
         do {
             let snapshot = try await ref.getData()
@@ -259,7 +277,7 @@ struct ProfileView: View {
                         likes: data["likes"] as? Int ?? 0,
                         commentsCount: data["commentsCount"] as? Int ?? 0,
                         isLikedByCurrentUser: (data["likedBy"] as? [String: Bool])?[uid] ?? false
-                    ))
+                    )) // Loads all predefined items within the post struct
                 }
             }
             await MainActor.run { self.userPosts = posts.sorted { $0.timestamp > $1.timestamp } } // Sort posts by timestamp
@@ -270,7 +288,7 @@ struct ProfileView: View {
 
     // MARK: - Observe live post updates from Firebase
     private func observeUserPosts() {
-        guard let currentUserID = Auth.auth().currentUser?.uid else { return }
+        guard let currentUserID = Auth.auth().currentUser?.uid else { return } // Ensures user is authenticated before continuing
         let ref = Database.database().reference().child("posts")
         ref.removeAllObservers()
         ref.queryOrdered(byChild: "timestamp").observe(FirebaseDatabase.DataEventType.childAdded) { snapshot in
@@ -289,13 +307,13 @@ struct ProfileView: View {
                 likes: data["likes"] as? Int ?? 0,
                 commentsCount: data["commentsCount"] as? Int ?? 0,
                 isLikedByCurrentUser: (data["likedBy"] as? [String: Bool])?[currentUserID] ?? false
-            )
+            ) // Retrieves all data stored under a post within firebase
             
             DispatchQueue.main.async {
                 if !self.userPosts.contains(where: { $0.id == post.id }) {
                     self.userPosts.insert(post, at: 0)
                     self.userPosts.sort { $0.timestamp > $1.timestamp }
-                }
+                } // Displays posts in order of most recent to oldest
             }
         }
     }
@@ -308,33 +326,33 @@ struct ProfileView: View {
                 await MainActor.run { profileImage = uiImage }
                 await uploadProfileImage(uiImage)
             }
-        } catch { print("Error loading image: \(error.localizedDescription)") }
+        } catch { print("Error loading image: \(error.localizedDescription)") } // Prints the error if the profile image uploaded is not valid and able to be used
     }
 
     private func uploadProfileImage(_ image: UIImage) async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid else { return } // Ensures user is authenticated before continuing
         guard let imageData = image.jpegData(compressionQuality: 0.8) else { return }
         let storageRef = Storage.storage().reference().child("profile_pictures/\(uid).jpg")
-        do {
+        do { // Stores the compressed image within a specific folder once converted to a consistent form for later retrieval
             _ = try await storageRef.putDataAsync(imageData)
-            let downloadURL = try await storageRef.downloadURL()
+            let downloadURL = try await storageRef.downloadURL() // Assigns URL
             let dbRef = Database.database().reference().child("users/\(uid)/profileImageUrl")
             try await dbRef.setValue(downloadURL.absoluteString)
             await MainActor.run { profileImageUrl = downloadURL }
-        } catch { print("Upload failed: \(error.localizedDescription)") }
+        } catch { print("Upload failed: \(error.localizedDescription)") } // Indicates an error in compression/storage of the image URL in the target destination
     }
     // MARK: - Like/unlike post
     private func toggleLike(for post: Post) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        let postRef = Database.database().reference().child("posts/\(post.id)")
+        guard let uid = Auth.auth().currentUser?.uid else { return } // Ensures user is authenticated before continuing
+        let postRef = Database.database().reference().child("posts/\(post.id)") // Assigns the specific target post id to the functions
         
         var updatedPost = post
         if post.isLikedByCurrentUser {
-            updatedPost.likes -= 1
+            updatedPost.likes -= 1 // Removes current like if already liked by suer
         } else {
-            updatedPost.likes += 1
+            updatedPost.likes += 1 // Adds like if not already liked by current user
         }
-        updatedPost.isLikedByCurrentUser.toggle()
+        updatedPost.isLikedByCurrentUser.toggle() // Toggles whether the post has been liked by the user
         
         if let index = userPosts.firstIndex(where: { $0.id == post.id }) {
             userPosts[index] = updatedPost
@@ -361,9 +379,9 @@ struct ProfileView: View {
     }
     
     // MARK: - Load and observe follow counts
-    private func loadFollowCounts() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        let ref = Database.database().reference().child("users").child(uid)
+    private func loadFollowCounts() async { // Loads initial follow/following counts
+        guard let uid = Auth.auth().currentUser?.uid else { return } // Ensures user is authenticated before continuing
+        let ref = Database.database().reference().child("users").child(uid) // Retrieves the specific data stored under the current active user
         do {
             let snapshot = try await ref.getData()
             if let userData = snapshot.value as? [String: Any] {
@@ -372,14 +390,14 @@ struct ProfileView: View {
                 await MainActor.run {
                     self.followersCount = followers.count
                     self.followingCount = following.count
-                }
+                } // Retrieves the stored value of followers/following of a specific account
             }
         } catch {
-            print("Failed to load follow counts: \(error.localizedDescription)")
+            print("Failed to load follow counts: \(error.localizedDescription)") // Prints error if followers/following are unable to be retrieved from firebase
         }
     }
-    private func observeFollowCounts() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+    private func observeFollowCounts() { // Observes follow counts for changes/updates
+        guard let uid = Auth.auth().currentUser?.uid else { return } // Ensures user is authenticated before continuing
         let ref = Database.database().reference().child("users").child(uid)
         
         ref.observe(.value) { snapshot in
@@ -415,7 +433,7 @@ struct CommentsView: View {
             if isLoading { // Loading and Empty States
                 ProgressView("Loading comments...")
                     .padding()
-            } else if comments.isEmpty {
+            } else if comments.isEmpty { // If no comments are stored within the post ID
                 Text("No comments yet.")
                     .foregroundColor(.gray)
                     .padding()
@@ -450,7 +468,7 @@ struct CommentsView: View {
                                         .formatted(date: .abbreviated, time: .shortened))
                                         .font(.caption)
                                         .foregroundColor(.gray)
-                                }
+                                } // Displays all data attached to the posted comment
                                 Spacer()
                             }
                             .padding(.horizontal)
@@ -480,7 +498,7 @@ struct CommentsView: View {
     // MARK: - Fetch and Listen for Comments
     private func observeComments() {
         let ref = Database.database().reference()
-            .child("posts").child(postId).child("comments")
+            .child("posts").child(postId).child("comments") // Retrieves the specific postID to load relevant comments
         
         ref.observe(.value) { snapshot in
             var fetched: [Comment] = []
@@ -509,7 +527,7 @@ struct CommentsView: View {
                             )
                             fetched.append(comment)
                             group.leave()
-                        }
+                        } // Retrieves all comment information required to display the comment under target post
                 }
             }
             
@@ -530,7 +548,7 @@ struct CommentsView: View {
             "userID": uid,
             "text": newComment,
             "timestamp": Date().timeIntervalSince1970
-        ]
+        ] // Sets relevant information of the comment posted, ready to be stored within Firebase
         
         ref.setValue(data)
         newComment = "" // Clear input after posting
