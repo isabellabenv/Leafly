@@ -2,29 +2,33 @@ import SwiftUI
 import FirebaseDatabase
 import FirebaseAuth
 
-struct PostWithUser: Identifiable {
-    let id: String
-    let post: Post
-    let username: String
-    let userProfileUrl: String?
+// MARK: - Data models
+struct PostWithUser: Identifiable { // Struc that represents a post along with the user who uploaded it. Combines all relevant data stored within the post for later display in feed
+    let id: String // Firebase post ID
+    let post: Post // Post context
+    let username: String // Publishers username
+    let userProfileUrl: String? // Optional, publishers profile image URL
 }
+// Result returned when user search bar is interacted with
 struct UserSearchResult: Identifiable {
-    let id: String
-    let username: String
-    let profileImageUrl: String?
+    let id: String // User's firebase UID
+    let username: String // User's username string
+    let profileImageUrl: String? // User's profile image URL, optional
 }
 
+// MARK: - Homeview
 struct HomeView: View {
-    @State private var posts: [PostWithUser] = []
-    @State private var isLoading = true
-    @StateObject private var postService = PostService.shared
-    @StateObject private var followService = FollowService.shared
+    @State private var posts: [PostWithUser] = [] // Posts to display in feed
+    @State private var isLoading = true // Whether feed is currently loading or not
+    @StateObject private var postService = PostService.shared // Shared service for posts
+    @StateObject private var followService = FollowService.shared // Shared service for follow/unfollow functions
+    
     //Search State
-    @State private var searchQuery = ""
-    @State private var searchResults: [UserSearchResult] = []
-    @State private var isSearching = false
+    @State private var searchQuery = "" // Current search text
+    @State private var searchResults: [UserSearchResult] = [] // Results retrieved from database
+    @State private var isSearching = false // Whether a search is in progress or not
     
-    
+    // MARK: Body
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -35,6 +39,7 @@ struct HomeView: View {
                             .font(.title)
                             .bold()
                     }
+                    // Search bar for users
                     HStack {
                         TextField("Search users...", text: $searchQuery, onCommit: {
                             searchUsers(query: searchQuery)
@@ -43,34 +48,34 @@ struct HomeView: View {
                         .padding(.horizontal)
                         .onChange(of: searchQuery) { newValue in
                             searchUsers(query: newValue)
-                        }
+                        } // Pushes entered value of searchQuery into searchUsers when value is changed
                         
                         if isSearching {
                             ProgressView()
                                 .padding(.trailing)
-                        }
+                        } // Display if a search is being held
                     }
                     .padding(.vertical, 4)
                     
                     Spacer()
-                    NavigationLink(destination: LeaderboardView()) {
+                    NavigationLink(destination: LeaderboardView()) { // Navigation to leaderboard
                         Image(systemName: "list.number")
                             .resizable()
                             .frame(width: 30, height: 30)
                             .foregroundColor(.white)
                     }
+                    
                     Image(systemName: "leaf.fill")
                         .resizable()
                         .frame(width: 40, height: 40)
                         .foregroundColor(.darkgreen)
-                }
+                } // App icon
                 .padding()
                 .background(Color.ggreen)
-                // 🔍 Search Bar
-                
+
                 // Search Results
-                if !searchResults.isEmpty {
-                    List(searchResults) { user in
+                if !searchResults.isEmpty { // If search results are not empty / contain atleast 1 user
+                    List(searchResults) { user in // Displays all relevant users retrieved from search result
                         NavigationLink(destination: OtherUserProfileView(userId: user.id)) {
                             HStack {
                                 if let url = user.profileImageUrl, let imageURL = URL(string: url) {
@@ -85,20 +90,19 @@ struct HomeView: View {
                                     Circle()
                                         .fill(Color.gray.opacity(0.3))
                                         .frame(width: 40, height: 40)
-                                }
+                                } // Displays user profile image if available, or placeholder if not
 
                                 Text(user.username)
                                     .font(.headline)
-                            }
+                            } // Displays username of relevant user
                         }
                     }
                     .listStyle(PlainListStyle())
-                } else {
+                } else { // If no users satisfy the search request
                     
-                    // Posts Feed
-                    
+                    // Posts feed - only displayed if search results are empty
                     if postService.posts.isEmpty {
-                        ProgressView("Loading posts...").padding()
+                        ProgressView("Loading posts...").padding() // If no posts are able to be displayed
                     } else {
                         ScrollView {
                             VStack(spacing: 16) {
@@ -107,7 +111,7 @@ struct HomeView: View {
                                         postWithUser: postWithUser,
                                         onLike: { postService.toggleLike(postID: postWithUser.post.id) },
                                         onFollow: { followService.toggleFollow(userId: postWithUser.post.userId) }
-                                    )
+                                    ) // Displays PostCardView for each post retrieved
                                     .environmentObject(followService) // pass follow service down
                                 }
                             }
@@ -119,32 +123,32 @@ struct HomeView: View {
             .navigationBarHidden(true)
         }
         .onAppear {
-            observePosts()
+            observePosts() // observes changes in posts on initial load
         }
         .refreshable {
-            await loadPosts()
+            await loadPosts() // Loads posts when refreshed
         }
     }
-    // MARK: - Search Users
+    // MARK: Search Users
     private func searchUsers(query: String) {
         guard !query.isEmpty else {
-            searchResults = []
+            searchResults = [] // returns empty search results
             return
         }
 
-        let lowercaseQuery = query.lowercased()
+        let lowercaseQuery = query.lowercased() // converts input text to lowercase to prevent case-sensitive errors
         let usersRef = Database.database().reference().child("users")
 
         // Fetch all users
         usersRef.observeSingleEvent(of: .value) { snapshot in
             var results: [UserSearchResult] = []
 
-            for child in snapshot.children {
+            for child in snapshot.children { // Loads all users and relevant usernames
                 if let childSnapshot = child as? DataSnapshot,
                    let data = childSnapshot.value as? [String: Any],
                    let username = data["username"] as? String {
 
-                    // Case-insensitive match
+                    // Retrieves users who satisfy the case-insensitive search query
                     if username.lowercased().contains(lowercaseQuery) {
                         let profileImageUrl = data["profileImageUrl"] as? String
                         let user = UserSearchResult(
@@ -160,12 +164,12 @@ struct HomeView: View {
             DispatchQueue.main.async {
                 self.searchResults = results
                 print("Total results: \(results.count)")
-            }
+            } // Displays relevant results, prints the expected number of results for debugging
         }
     }
-    // MARK: - Load Posts
-    private func loadPosts() async {
-        guard let currentUserID = Auth.auth().currentUser?.uid else { return }
+    // MARK: Load Posts
+    private func loadPosts() async { // Loads all posts and user data for pull to refresh
+        guard let currentUserID = Auth.auth().currentUser?.uid else { return } // Ensures current user is authenticated
         let postsRef = Database.database().reference().child("posts")
         
         do {
@@ -176,7 +180,7 @@ struct HomeView: View {
                 guard let data = child.value as? [String: Any],
                       let userId = data["userID"] as? String else { continue }
                 
-                // Fetch user data
+                // Fetch user data for each post
                 let userRef = Database.database().reference().child("users").child(userId)
                 let userSnapshot = try await userRef.getData()
                 let userData = userSnapshot.value as? [String: Any]
@@ -185,7 +189,7 @@ struct HomeView: View {
                 let username: String = userData?["username"] as? String ?? "Unknown"
                 let profileImageUrl: String? = userData?["profileImageUrl"] as? String
                 
-                // Build Post
+                // Build post struct previously defined
                 let post = Post(
                     id: child.key,
                     userId: userId,
@@ -207,7 +211,7 @@ struct HomeView: View {
                 ))
             }
             
-            fetchedPosts.shuffle() // random order
+            fetchedPosts.shuffle() // randomises order
             await MainActor.run {
                 self.posts = fetchedPosts
                 self.isLoading = false
@@ -215,10 +219,11 @@ struct HomeView: View {
             
         } catch {
             print("Failed to load posts: \(error.localizedDescription)")
-            await MainActor.run { self.isLoading = false }
+            await MainActor.run { self.isLoading = false } // prints error if posts are not able to load
         }
     }
-    private func observePosts() {
+    // MARK: Observe posts in realtime
+    private func observePosts() { // Observes Firebase posts in real time and updates feed on new/changed posts
         guard let currentUserID = Auth.auth().currentUser?.uid else { return }
         let postsRef = Database.database().reference().child("posts")
         
@@ -226,7 +231,7 @@ struct HomeView: View {
         self.posts.removeAll()
         self.isLoading = true
         
-        postsRef.observe(.childAdded) { snapshot in
+        postsRef.observe(.childAdded) { snapshot in // observes new posts added
             guard let data = snapshot.value as? [String: Any],
                   let userId = data["userID"] as? String else { return }
             
@@ -247,21 +252,21 @@ struct HomeView: View {
                         likes: data["likes"] as? Int ?? 0,
                         commentsCount: data["commentsCount"] as? Int ?? 0,
                         isLikedByCurrentUser: (data["likedBy"] as? [String: Bool])?[currentUserID] ?? false
-                    )
+                    ) // retrieves all post data to define post struct
                     
                     let postWithUser = PostWithUser(
                         id: snapshot.key,
                         post: post,
                         username: username,
                         userProfileUrl: profileImageUrl
-                    )
+                    ) // retrieves user data relevant to post
                     
                     DispatchQueue.main.async {
                         if !self.posts.contains(where: { $0.id == postWithUser.id }) {
                             self.posts.insert(postWithUser, at: 0)
                             self.posts.sort { $0.post.timestamp > $1.post.timestamp }
                         }
-                        self.isLoading = false   // <-- mark as loaded
+                        self.isLoading = false   // sets isLoading to false once loading has been completed
                     }
                 }
         }
@@ -281,35 +286,40 @@ struct HomeView: View {
                         username: self.posts[index].username,
                         userProfileUrl: self.posts[index].userProfileUrl
                     )
-                }
+                } // observes for updates to likes and comments, retrieves the relevant data to update the UI display
             }
         }
     }
-    private func toggleLike(for postID: String) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        let postRef = Database.database().reference().child("posts/\(postID)")
+    
+    // MARK: Like toggle
+    private func toggleLike(for postID: String) { // Automatically toggles likes/unlikes for current user in Firebase storage
+        guard let uid = Auth.auth().currentUser?.uid else { return } // Ensures current user is authenticated
+        let postRef = Database.database().reference().child("posts/\(postID)") // Defines the target post
         
         postRef.runTransactionBlock { currentData in
-            if var postData = currentData.value as? [String: Any] {
+            if var postData = currentData.value as? [String: Any] { // Retrieves existing post data of likes and users who have liked the post
                 var likes = postData["likes"] as? Int ?? 0
                 var likedBy = postData["likedBy"] as? [String: Bool] ?? [:]
-                if likedBy[uid] == true {
+                
+                if likedBy[uid] == true { // Unlikes if already liked by current user
                     likes -= 1
                     likedBy[uid] = nil
                 } else {
-                    likes += 1
+                    likes += 1 // Adds like if not already liked by current user
                     likedBy[uid] = true
                 }
                 postData["likes"] = max(likes, 0)
                 postData["likedBy"] = likedBy
                 currentData.value = postData
             }
-            return TransactionResult.success(withValue: currentData)
+            return TransactionResult.success(withValue: currentData) // Returns updated data if successful
         }
     }
-    private func followUser(targetUserId: String) {
-        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
-        if currentUserId == targetUserId { return } // can't follow yourself
+    
+    // MARK: Follow user
+    private func followUser(targetUserId: String) { // Updates follower/following counts in firebase when changes
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return } // Ensures current user is authenticated
+        if currentUserId == targetUserId { return } // prevents users from following themself
         
         let usersRef = Database.database().reference().child("users")
         
@@ -327,23 +337,21 @@ struct HomeView: View {
             return .success(withValue: data)
         }
     }
-
 }
-
-
-struct PostCardView: View {
-    let postWithUser: PostWithUser
+// MARK: - PostCardView
+struct PostCardView: View { // Reusable structure that retrieves and displays a single post
+    let postWithUser: PostWithUser // Loads publishing user's data
     var onLike: (() -> Void)?
     var onFollow: (() -> Void)?
-    @State private var isFollowing = false
-    @EnvironmentObject private var followService: FollowService
+    @State private var isFollowing = false // Sets follow state
+    @EnvironmentObject private var followService: FollowService // Connects followService
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // User info
+            // User info header
             HStack {
                 if let urlString = postWithUser.userProfileUrl, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
+                    AsyncImage(url: url) { phase in // Retrieves user profile image if possible
                         switch phase {
                         case .empty: ProgressView().frame(width: 40, height: 40)
                         case .success(let image): image.resizable().scaledToFill().frame(width: 40, height: 40).clipShape(Circle())
@@ -356,15 +364,15 @@ struct PostCardView: View {
                         .fill(Color.green.opacity(0.3))
                         .frame(width: 40, height: 40)
                         .overlay(Image(systemName: "person.fill").foregroundColor(.white))
-                }
+                } // Placeholder if no image is found or image cannot be retrieved
                 
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading) { // Allows navigation to target user's profile view if username is tapped
                     NavigationLink(destination: OtherUserProfileView(userId: postWithUser.post.userId)) {
                         Text(postWithUser.username)
                             .font(.headline)
                             .foregroundStyle(.black)
                     }
-                    Text(Date(timeIntervalSince1970: postWithUser.post.timestamp)
+                    Text(Date(timeIntervalSince1970: postWithUser.post.timestamp) // Displays post timestamp
                         .formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
                     .foregroundColor(.gray)
@@ -372,29 +380,29 @@ struct PostCardView: View {
                 Spacer()
             }
             
-            // Post text
+            // Displays post text
             Text(postWithUser.post.text)
                 .font(.body)
             
-            // Post image
+            // Retrieves and loads post image if attached
             if let urlString = postWithUser.post.imageUrl, let url = URL(string: urlString) {
                 AsyncImage(url: url) { phase in
                     switch phase {
-                    case .empty: ProgressView()
-                    case .success(let image): image.resizable().scaledToFill().frame(height: 200).cornerRadius(10)
-                    case .failure: Image(systemName: "photo")
+                    case .empty: ProgressView() // remains empty if no image is attached
+                    case .success(let image): image.resizable().scaledToFill().frame(height: 200).cornerRadius(10) // sets constraints for image size if retrievable
+                    case .failure: Image(systemName: "photo") // Placeholder icon if the photo fails to load
                     @unknown default: EmptyView()
                     }
                 }
                 .clipped()
             }
             
-            // Points
+            // Green Points
             HStack {
                 Image(systemName: "leaf.circle")
                 Text("+\(postWithUser.post.points) Green Points")
                     .font(.caption)
-                    .foregroundColor(.green)
+                    .foregroundColor(.darkgreen)
                 Spacer()
             }
             
@@ -404,24 +412,24 @@ struct PostCardView: View {
                     Label("\(postWithUser.post.likes)", systemImage: postWithUser.post.isLikedByCurrentUser ? "hand.thumbsup.fill" : "hand.thumbsup")
                         .font(.caption)
                         .foregroundColor(postWithUser.post.isLikedByCurrentUser ? .blue : .gray)
-                }
+                } // If post has already been liked by the current authenticated user, it will display as a filled, blue icon, otherwise a gray outline
                 
                 NavigationLink(destination: CommentsView(postId: postWithUser.post.id)) {
                     Label("\(postWithUser.post.commentsCount)", systemImage: "bubble.right")
                         .font(.caption)
                         .foregroundColor(.gray)
-                }
+                } // Navigations to comments view of the target post
                 
-                if postWithUser.post.userId != Auth.auth().currentUser?.uid {
+                if postWithUser.post.userId != Auth.auth().currentUser?.uid { // Checks that the userID of the target post does not match the userID of the authenticated current userID
                     Button(action: {
                         onFollow?()
                     }) {
-                        Text(followService.isFollowing(postWithUser.post.userId) ? "Unfollow" : "Follow")
+                        Text(followService.isFollowing(postWithUser.post.userId) ? "Unfollow" : "Follow") // determines appearence of button if the current authenticated user
                             .font(.caption)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
                             .background(followService.isFollowing(postWithUser.post.userId) ? Color.gray.opacity(0.3) : Color.blue)
-                            .foregroundColor(followService.isFollowing(postWithUser.post.userId) ? .black : .white)
+                            .foregroundColor(followService.isFollowing(postWithUser.post.userId) ? .black : .white) // determines background colour based on if user is following target user
                             .cornerRadius(6)
                     }
                 }
@@ -434,31 +442,33 @@ struct PostCardView: View {
         .onAppear {
             if !postWithUser.post.userId.isEmpty {
                 checkIfFollowing()
-            }
+            } // On intial appearence, check the post is not empty and runs checkIfFollowing
         }
     }
+// MARK: Toggle follow/unfollow
     private func toggleFollow(targetUserId: String) {
-        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return } // Ensures current user is authenticated
         let userRef = Database.database().reference().child("users")
-        let currentUserFollowingRef = userRef.child(currentUserId).child("following").child(targetUserId)
-        let targetUserFollowersRef = userRef.child(targetUserId).child("followers").child(currentUserId)
+        let currentUserFollowingRef = userRef.child(currentUserId).child("following").child(targetUserId) // Retrieves users current following
+        let targetUserFollowersRef = userRef.child(targetUserId).child("followers").child(currentUserId) // Retrieves users current followers
         
         currentUserFollowingRef.observeSingleEvent(of: .value) { snapshot in
             if snapshot.exists() {
-                // Unfollow
+                // Unfollows, removes current userID from target user's followers, and target userID from current user's following
                 currentUserFollowingRef.removeValue()
                 targetUserFollowersRef.removeValue()
-                self.isFollowing = false
+                self.isFollowing = false //toggles isFollowing
             } else {
-                // Follow
+                // Follows, adds current userID to target user's followers, and target userID to the current user's following
                 currentUserFollowingRef.setValue(true)
                 targetUserFollowersRef.setValue(true)
-                self.isFollowing = true
+                self.isFollowing = true //toggles isFollowing
             }
         }
     }
-    private func checkIfFollowing() {
-        guard let currentUserId = Auth.auth().currentUser?.uid,
+    // MARK: Checks if current user is following target user
+    private func checkIfFollowing() { // Checks whether the current authenticated userID is listed within the target user's followers
+        guard let currentUserId = Auth.auth().currentUser?.uid, // Authenticates that the current authenticated userID does not match the post publishers userID (does not complete the function to the user's own published post)
               !postWithUser.post.userId.isEmpty else { return }
         
         let ref = Database.database().reference()
@@ -469,18 +479,19 @@ struct PostCardView: View {
         
         ref.observeSingleEvent(of: .value) { snapshot in
             self.isFollowing = snapshot.exists()
-        }
+        } // observes for changes if users follow/unfollow
     }
 }
-
+// MARK: - Leaderboard View
 struct LeaderboardView: View {
-    @State private var leaderboard: [(uid: String, username: String, profileImageUrl: String?, points: Int)] = []
-    @State private var allUsers: [(uid: String, username: String, profileImageUrl: String?, points: Int)] = []
-    @State private var isLoading = true
-    @State private var currentUserId: String?
-    @State private var followingIds: [String] = []
-    @State private var filterOption: String = "All"
+    @State private var leaderboard: [(uid: String, username: String, profileImageUrl: String?, points: Int)] = [] // Stores leaderboard users after applying filter (all or following)
+    @State private var allUsers: [(uid: String, username: String, profileImageUrl: String?, points: Int)] = [] // Stores all users fetched from firebase before filtering
+    @State private var isLoading = true // Determines whether functions are currently in progress
+    @State private var currentUserId: String? // Stores current authenticated user's UserID
+    @State private var followingIds: [String] = [] // Stores UserID of the users the current user is following
+    @State private var filterOption: String = "All" // Determines which leaderboard filter is active
     
+    // MARK:  Body
     var body: some View {
         VStack {
             // Filter Picker
@@ -488,24 +499,25 @@ struct LeaderboardView: View {
                 Text("All").tag("All")
                 Text("Following").tag("Following")
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.segmented) // Segmented control for switching
             .padding(.horizontal)
             .onChange(of: filterOption) { _ in
-                applyFilter()
+                applyFilter() // Re-apply filter when selection is changed
             }
             
-            if isLoading {
+            if isLoading { // Determines if loading
                 ProgressView("Loading leaderboard...")
                     .padding()
-            } else if leaderboard.isEmpty {
+            } else if leaderboard.isEmpty { // If the leaderboard does not display any users
                 Text("No users found.")
                     .foregroundColor(.gray)
             } else {
-                List {
+                List { // Displays top 10 users
                     ForEach(Array(leaderboard.prefix(10).enumerated()), id: \.offset) { index, user in
                         leaderboardRow(index: index, user: user)
                     }
                     
+                    // If current user is outside the top 10, show their position separately
                     if let currentId = currentUserId,
                        let myIndex = leaderboard.firstIndex(where: { $0.uid == currentId }),
                        myIndex >= 10 {
@@ -523,36 +535,37 @@ struct LeaderboardView: View {
         .navigationTitle("Leaderboard")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            // Get current user's ID and load data on initial appearence
             currentUserId = Auth.auth().currentUser?.uid
             loadFollowingIds()
             loadLeaderboard()
         }
     }
-    
+// MARK: - Leaderboard
     @ViewBuilder
     private func leaderboardRow(index: Int, user: (uid: String, username: String, profileImageUrl: String?, points: Int)) -> some View {
-        NavigationLink(destination: OtherUserProfileView(userId: user.uid)) {
+        NavigationLink(destination: OtherUserProfileView(userId: user.uid)) { // Navigate to OtherUserProfileView when row is tapped
             HStack {
-                Text("\(index + 1)")
+                Text("\(index + 1)") // Rank number
                     .font(.headline)
                     .frame(width: 30)
                 
                 if let urlString = user.profileImageUrl, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
+                    AsyncImage(url: url) { phase in  // Loading profile image
                         switch phase {
-                        case .empty: ProgressView().frame(width: 40, height: 40)
-                        case .success(let image): image.resizable().scaledToFill().frame(width: 40, height: 40).clipShape(Circle())
-                        case .failure: Circle().fill(Color.green.opacity(0.3)).frame(width: 40, height: 40).overlay(Image(systemName: "person.fill").foregroundColor(.white))
+                        case .empty: ProgressView().frame(width: 40, height: 40) // while loading image or if no image is present
+                        case .success(let image): image.resizable().scaledToFill().frame(width: 40, height: 40).clipShape(Circle()) // Displays profile image if successfully retrieved
+                        case .failure: Circle().fill(Color.green.opacity(0.3)).frame(width: 40, height: 40).overlay(Image(systemName: "person.fill").foregroundColor(.white)) // Placeholder if profile picture failed to load
                         @unknown default: EmptyView()
                         }
                     }
                 } else {
-                    Circle()
+                    Circle() // Default placeholder if image  is not available
                         .fill(Color.green.opacity(0.3))
                         .frame(width: 40, height: 40)
                         .overlay(Image(systemName: "person.fill").foregroundColor(.white))
                 }
-                
+                // Username and points display
                 VStack(alignment: .leading) {
                     Text(user.username)
                         .font(.headline)
@@ -563,27 +576,25 @@ struct LeaderboardView: View {
                 Spacer()
             }
             .padding(.vertical, 4)
-            .background(user.uid == currentUserId ? Color.yellow.opacity(0.2) : Color.clear)
+            .background(user.uid == currentUserId ? Color.yellow.opacity(0.2) : Color.clear) // Sets background colour to yellow if the userID matches the current authenticated userID (Changes current user's background in list)
             .cornerRadius(8)
         }
     }
-    
+    // MARK: Load Leaderboard Data
     private func loadLeaderboard() {
-        guard let currentUserId = Auth.auth().currentUser?.uid else { return }
-        self.currentUserId = currentUserId
+        guard let currentUserId = Auth.auth().currentUser?.uid else { return } // Authenticates current userId
+        self.currentUserId = currentUserId // Sets current userID
         
         let usersRef = Database.database().reference().child("users")
-        
         usersRef.observeSingleEvent(of: .value) { snapshot in
-            var fetchedLeaderboard: [(String, String, String?, Int)] = []
-            
+            var fetchedLeaderboard: [(String, String, String?, Int)] = [] // Retrieves all users from database
             for case let child as DataSnapshot in snapshot.children {
                 guard let userData = child.value as? [String: Any] else { continue }
                 let username = userData["username"] as? String ?? "Unknown"
-                let profileImageUrl = userData["profileImageUrl"] as? String
+                let profileImageUrl = userData["profileImageUrl"] as? String // Loads all user data
                 
-                // --- FIX: Load greenPoints from any type ---
-                let pointsValue = userData["points"]
+                // MARK: Handle points
+                let pointsValue = userData["points"] // Handle all cases if Firebase returns points as an inconsistant value type (Int, Double or String)
                 let points: Int
                 if let p = pointsValue as? Int {
                     points = p
@@ -601,14 +612,14 @@ struct LeaderboardView: View {
             fetchedLeaderboard.sort { $0.3 > $1.3 } // Sort by points descending
             
             DispatchQueue.main.async {
-                self.allUsers = fetchedLeaderboard
-                self.applyFilter()
-                self.isLoading = false
+                self.allUsers = fetchedLeaderboard // Sets the target users to display
+                self.applyFilter() // Apply filters
+                self.isLoading = false // Determine loading state
             }
         }
     }
-    
-    private func loadFollowingIds() {
+// MARK: Load Following IDs
+    private func loadFollowingIds() { // Loads specific UserID's when filter is applied
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let followingRef = Database.database().reference()
             .child("users").child(uid).child("following")
@@ -624,14 +635,14 @@ struct LeaderboardView: View {
                 self.followingIds = ids
                 applyFilter()
             }
-        }
+        } // Retrieves and loads all userID's within the current authenticated user's following list
     }
-    
-    private func applyFilter() {
-        if filterOption == "Following" {
+    // MARK: Apply  filter
+    private func applyFilter() { // Applies the filter to select specific users to display
+        if filterOption == "Following" { // Show only following and current user
             leaderboard = allUsers.filter { followingIds.contains($0.uid) || $0.uid == currentUserId }
         } else {
-            leaderboard = allUsers
+            leaderboard = allUsers // Show all users
         }
     }
 }
